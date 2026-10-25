@@ -3,6 +3,7 @@ from shared.schemas.application import Application, ApplicationStatus, PauseReas
 from shared.schemas.failure import FailureClass, FailureEvent
 from shared.schemas.job import Job, JobStatus
 from shared.schemas.profile import Profile
+from shared.schemas.profile_record import ProfileRecord
 from shared.schemas.skill import Skill
 from shared.schemas.snapshot import SnapshotIndex
 from shared.schemas.source_health import SourceHealth
@@ -20,4 +21,5 @@ __all__ = [
     "Skill",
     "SnapshotIndex",
     "SourceHealth",
+    "ProfileRecord",
 ]
