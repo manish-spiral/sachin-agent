@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Runtime state
+data/
+logs/
+snapshots/
+browser_profile/
+profile-data/*.json
+profile-data/*.md
+!profile-data/.gitkeep
+
+# Secrets
+.env
+
+# DB
+*.db
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
