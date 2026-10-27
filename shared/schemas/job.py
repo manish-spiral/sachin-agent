@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -18,6 +19,9 @@ class JobStatus(StrEnum):
     APPLIED = "applied"
     FAILED = "failed"
 
+def make_job_id(source: str, external_id: str) -> str:
+    """Deterministic id: same job from same source always hashes to the same id."""
+    return hashlib.sha256(f"{source}|{external_id}".encode()).hexdigest()
 
 def _now() -> datetime:
     return datetime.now(UTC)

@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime
 
 from loguru import logger
-from sqlmodel import select
+from sqlmodel import col, select
 
 from shared.db.engine import get_session
 from shared.paths import profile_json_path
@@ -47,7 +47,7 @@ def save_profile(profile: Profile, *, source: str = "manual", notes: str = "") -
     # 2. Append history row.
     with get_session() as s:
         prev = s.exec(
-            select(ProfileRecord).order_by(ProfileRecord.version.desc()).limit(1)
+            select(ProfileRecord).order_by(col(ProfileRecord.version).desc()).limit(1)
         ).first()
         next_version = (prev.version + 1) if prev else 1
         record = ProfileRecord(
@@ -67,9 +67,10 @@ def save_profile(profile: Profile, *, source: str = "manual", notes: str = "") -
 
 def list_history(limit: int = 20) -> list[ProfileRecord]:
     with get_session() as s:
-        return s.exec(
-            select(ProfileRecord).order_by(ProfileRecord.version.desc()).limit(limit)
+        return list(s.exec(
+            select(ProfileRecord).order_by(col(ProfileRecord.version).desc()).limit(limit)
         ).all()
+    )
 
 
 def restore_version(version: int) -> Profile:

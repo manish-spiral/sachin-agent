@@ -4,6 +4,7 @@ from shared.schemas.adapter import AdapterVersion
 from shared.schemas.application import Application
 from shared.schemas.failure import FailureEvent
 from shared.schemas.job import Job
+from shared.schemas.profile_record import ProfileRecord
 from shared.schemas.skill import Skill
 from shared.schemas.snapshot import SnapshotIndex
 from shared.schemas.source_health import SourceHealth
@@ -13,6 +14,7 @@ __all__ = [
     "Application",
     "FailureEvent",
     "Job",
+    "ProfileRecord", 
     "Skill",
     "SnapshotIndex",
     "SourceHealth",

@@ -18,7 +18,8 @@ def _ensure_sqlite_dir() -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def init_db() -> None:
+def fast_create() -> None:
+    """create_all — used by tests only. Production: `sachin-agent-db init`."""
     _ensure_sqlite_dir()
     SQLModel.metadata.create_all(get_engine())
 

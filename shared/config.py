@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     # Core
-    database_url: str = "sqlite:///data/jobagent.db"
+    database_url: str = "sqlite:///data/sachin-agent.db"
     log_level: str = "INFO"
 
     # Directories

@@ -7,6 +7,18 @@ init:
 db-init:
 	sachin-agent-db init
 
+db-migrate:
+	sachin-agent-db migrate -m "$(MSG)"
+
+db-upgrade:
+	sachin-agent-db upgrade
+
+db-downgrade:
+	sachin-agent-db downgrade
+
+db-current:
+	sachin-agent-db current
+
 db-stats:
 	sachin-agent-db stats
 

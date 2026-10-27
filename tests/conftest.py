@@ -30,9 +30,9 @@ def _test_env():
 @pytest.fixture
 def fresh_db(_test_env):
     from shared.db.engine import reset_engine
-    from shared.db.migrate import drop_db, init_db
+    from shared.db.migrate import drop_db, fast_create
 
     reset_engine()
     drop_db()
-    init_db()
+    fast_create()
     yield
