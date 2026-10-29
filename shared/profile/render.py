@@ -68,6 +68,12 @@ def render_markdown(p: Profile) -> str:
             lines.append(f"- {c.name} — {c.issuer} ({c.date})")
         lines.append("")
 
+    if p.answers:
+        lines += ["## Application answers", ""]
+        for qa in p.answers:
+            lines.append(f"- **{qa.question}** {qa.answer}")
+        lines.append("")
+
     if not p.finalized:
         issues = p.completeness_issues()
         if issues:

@@ -32,8 +32,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 
-    # Matcher (Phase 5)
-    scoring_model: str = "gpt-4o-mini"
+    # LLM: provider "openai" | "groq"; unset = whichever key is present.
+    # Models unset = provider defaults (see shared/llm.py).
+    groq_api_key: str | None = None
+    llm_provider: str | None = None
+    extraction_model: str | None = None
+    scoring_model: str | None = None
 
 
 _settings: Settings | None = None

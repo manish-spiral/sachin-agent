@@ -20,6 +20,7 @@ from matcher.calibrate import (
 from matcher.review import JobNotFound, decide, find_job, format_job, review_queue
 from matcher.scoring import ProfileNotReady, load_weights, score_pending_jobs
 from shared.db.engine import get_session
+from shared.llm import LLMNotConfigured
 from shared.logging import configure_logging
 from shared.paths import ensure_dirs
 from shared.schemas.job import Job, JobStatus
@@ -40,7 +41,8 @@ def _bootstrap() -> None:
 @app.command()
 def run(
     limit: Annotated[
-        int | None, typer.Option("--limit", "-l", help="Max jobs to score this run.")
+        int | None,
+        typer.Option("--limit", "-l", help="Max LLM calls this run (prefiltered jobs are free)."),
     ] = 100,
     rescore: Annotated[
         bool, typer.Option("--rescore", help="Also re-score already SCORED jobs.")
@@ -49,12 +51,15 @@ def run(
     """Score new jobs against the finalized profile."""
     try:
         report = score_pending_jobs(limit=limit, rescore=rescore)
-    except ProfileNotReady as exc:
+    except (ProfileNotReady, LLMNotConfigured) as exc:
         typer.echo(f"✗ {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(
-        f"scored: {report.scored}  prefiltered: {report.prefiltered}  failed: {report.failed}"
+        f"scored: {report.scored}  prefiltered: {report.prefiltered}  failed: {report.failed}  "
+        f"citation issues: {report.citation_issues}"
     )
+    if report.stopped:
+        typer.echo(f"stopped early ({report.stopped}). Unscored jobs stay queued for the next run.")
 
 
 def _set_status(id_prefix: str, to: JobStatus) -> None:

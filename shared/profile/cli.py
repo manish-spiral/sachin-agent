@@ -11,15 +11,19 @@ from pydantic import ValidationError
 from shared.logging import configure_logging
 from shared.paths import ensure_dirs, profile_md_path
 from shared.profile.extract import extract_text
+from shared.profile.facts import active_facts
+from shared.profile.faithfulness import faithfulness_issues
 from shared.profile.llm import ExtractionError, extract_profile_from_text
 from shared.profile.render import render_markdown
 from shared.profile.store import (
     list_history,
+    load_current_profile,
     load_profile,
     restore_version,
     save_profile,
 )
 from shared.schemas.profile import Profile
+from shared.schemas.profile_fact import FactKind
 
 app = typer.Typer(help="Applicant profile management", no_args_is_help=True)
 
@@ -43,8 +47,21 @@ def init() -> None:
 
 
 @app.command("import")
-def import_cv(path: Annotated[Path, typer.Argument(exists=True, readable=True)],) -> None:
+def import_cv(
+    path: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    force: Annotated[
+        bool, typer.Option("--force", help="Replace the existing profile (kept in history).")
+    ] = False,
+) -> None:
     """Extract a profile from a CV (PDF/DOCX/TXT) using the LLM."""
+    if load_profile() is not None and not force:
+        typer.echo(
+            "✗ A profile already exists; importing would replace it, including hand edits "
+            "(preferences, answers, finalized). Re-run with --force to replace it; the "
+            "current version stays in `history` and can be restored.",
+            err=True,
+        )
+        raise typer.Exit(1)
     try:
         text = extract_text(path)
     except ValueError as e:
@@ -57,9 +74,14 @@ def import_cv(path: Annotated[Path, typer.Argument(exists=True, readable=True)],
         typer.echo(f"✗ {e}", err=True)
         raise typer.Exit(1) from e
 
-    save_profile(profile, source="import", notes=f"from {path.name}")
+    save_profile(profile, source="import", notes=f"from {path.name}", source_text=text)
     issues = profile.completeness_issues()
     typer.echo(f"Imported draft from {path.name} ({len(text)} chars).")
+    suspicious = faithfulness_issues(profile, text)
+    if suspicious:
+        typer.echo("Check these against your CV before finalizing:")
+        for item in suspicious:
+            typer.echo(f"  - {item}")
     if issues:
         typer.echo("Draft is incomplete. Run `validate` to see what's missing:")
         for i in issues:
@@ -106,6 +128,28 @@ def render() -> None:
     out = profile_md_path()
     out.write_text(md, encoding="utf-8")
     typer.echo(f"Wrote {out}")
+
+
+@app.command()
+def facts(
+    kind: Annotated[FactKind | None, typer.Option("--kind", "-k", help="Only this kind.")] = None,
+    evidence: Annotated[bool, typer.Option("--evidence", help="Show the source CV line.")] = False,
+) -> None:
+    """List the citable facts every LLM must ground its claims in."""
+    current = load_current_profile()
+    if current is None:
+        typer.echo("No profile found. Run `init` or `import` first.")
+        raise typer.Exit(1)
+    rows = active_facts([kind] if kind else None, include_pii=True)
+    for fact in rows:
+        flags = ("✓" if fact.verified else "·") + ("🔒" if fact.pii else "  ")
+        typer.echo(f"{flags} [{fact.id}] ({fact.kind.value}) {fact.text}")
+        if evidence and fact.evidence:
+            typer.echo(f"      ↳ CV: {fact.evidence}")
+    typer.echo(
+        f"\n{len(rows)} facts (profile v{current[1]}). ✓ = verified (finalized), "
+        "🔒 = PII, never sent to an LLM."
+    )
 
 
 @app.command()

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Protocol
 
 from loguru import logger
 from rapidfuzz import fuzz
@@ -17,15 +18,17 @@ from sqlmodel import col, select
 
 from matcher.llm import parse_structured
 from matcher.prompts import SCORE_PROMPT_VERSION, SCORE_SYSTEM_PROMPT, SCORE_USER_TEMPLATE
-from shared.config import get_settings
 from shared.db.engine import get_session
 from shared.db.failures import domain_from_url, emit_failure
+from shared.llm import Task, resolve
 from shared.paths import scoring_weights_path
-from shared.profile.store import list_history, load_profile
+from shared.profile.facts import active_facts, format_facts_for_prompt, unknown_citations
+from shared.profile.store import load_current_profile
 from shared.schemas.failure import FailureClass
 from shared.schemas.job import Job, JobStatus
 from shared.schemas.job_transitions import transition
 from shared.schemas.profile import Profile
+from shared.schemas.profile_fact import ProfileFact
 from shared.schemas.score import Dimension, ScoreBreakdown, ScoreMethod, StoredScore
 
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -41,12 +44,27 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 DEALBREAKERS = (Dimension.LOCATION, Dimension.VISA)
 DEALBREAKER_CAP = 1.5
 PREFILTER_SCORE = 1.0
-# Deliberately permissive: the prefilter only drops obviously unrelated titles
+# The prefilter only drops titles without the role noun of any target title
 # (sales roles for an engineer) to save LLM calls; nuance is the LLM's job.
-TITLE_PREFILTER_THRESHOLD = 50
+# Two rules that failed on real data: character-level fuzzy scores ("writer
+# content marketing" scores 50 against "backend engineer" on letters alone),
+# and any shared word ("Account Executive, Platforms" matched "Platform
+# Engineer"). Fuzzy matching remains only as a fallback for spelling variants.
+TITLE_FUZZY_FALLBACK = 80
+# Level and filler words: sharing "senior" says nothing about the role.
+_GENERIC_TITLE_WORDS = {
+    "senior", "sr", "junior", "jr", "staff", "principal", "lead", "head", "chief",
+    "associate", "intern", "trainee", "i", "ii", "iii", "iv", "of", "and", "the",
+    "for", "to", "in", "at", "with", "new", "grad", "remote", "hybrid",
+}
+_TITLE_SYNONYMS = {"developer": "engineer", "programmer": "engineer", "engineering": "engineer", "dev": "engineer"}
 DESCRIPTION_CHARS = 6000
 
-Scorer = Callable[[str, str], ScoreBreakdown]
+
+class Scorer(Protocol):
+    model: str
+
+    def __call__(self, system: str, user: str) -> ScoreBreakdown: ...
 
 
 class ProfileNotReady(RuntimeError):
@@ -58,6 +76,19 @@ class ScoringReport:
     scored: int = 0
     prefiltered: int = 0
     failed: int = 0
+    # Jobs whose reasons cited facts that don't exist (scored, but flagged).
+    citation_issues: int = 0
+    # Set when the run stopped early (e.g. the provider's daily quota ran out).
+    stopped: str | None = None
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """The finalized profile plus the non-PII facts the LLM is allowed to see."""
+
+    profile: Profile
+    version: int
+    facts: list[ProfileFact] = field(default_factory=list)
 
 
 def load_weights() -> dict[str, float]:
@@ -80,6 +111,27 @@ def _alnum(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
+def _words(title: str) -> list[str]:
+    words = []
+    for word in re.findall(r"[a-z0-9]+", title.lower()):
+        word = _TITLE_SYNONYMS.get(word, word)
+        words.append(word[:-1] if len(word) > 3 and word.endswith("s") else word)
+    return words
+
+
+def _matches_target(title: str, target: str) -> bool:
+    """The target's head noun ("engineer" in "Backend Engineer") must be in the
+    title. A generic head ("staff" in "Member of Technical Staff") is no signal
+    ("Chief of Staff"), so then the whole target phrase must appear."""
+    target_words = _words(target)
+    if not target_words:
+        return False
+    head = target_words[-1]
+    if head in _GENERIC_TITLE_WORDS:
+        return " ".join(target_words) in " ".join(_words(title))
+    return head in _words(title)
+
+
 def prefilter(job: Job, profile: Profile) -> str | None:
     """Return why a job needs no LLM call, or None if it should be scored."""
     company = job.company_norm or _alnum(job.company)
@@ -91,31 +143,36 @@ def prefilter(job: Job, profile: Profile) -> str | None:
     targets = profile.preferences.target_titles
     if targets:
         title = job.title_norm or job.title.lower()
-        best = max(fuzz.token_set_ratio(title, t.lower()) for t in targets)
-        if best < TITLE_PREFILTER_THRESHOLD:
-            return f"title {job.title!r} is unrelated to target titles (best match {best:.0f}/100)"
+        if not any(_matches_target(title, t) for t in targets):
+            best = max(fuzz.token_set_ratio(title, t.lower()) for t in targets)
+            if best < TITLE_FUZZY_FALLBACK:
+                return f"title {job.title!r} has no target role noun ({', '.join(targets)})"
     return None
 
 
-def profile_for_prompt(profile: Profile) -> str:
-    """The profile minus contact details: scoring needs facts, not PII."""
-    data = profile.model_dump(
-        mode="json",
-        exclude={
-            "identity": {"first_name", "last_name", "email", "phone", "linkedin", "github", "portfolio"},
-            "finalized": True,
-        },
-    )
-    return json.dumps(data, ensure_ascii=False)
+def priority(job: Job, profile: Profile) -> tuple[int, datetime]:
+    """Cheap ordering for LLM calls: with a daily request cap, spend it on jobs
+    in a place the candidate can work first, newest first within that."""
+    places = set((job.location_norm or "").split(" | "))
+    preferred = {loc.strip().lower() for loc in profile.preferences.preferred_locations}
+    if places & preferred:
+        location = 2
+    elif "remote" in places and profile.preferences.remote_ok:
+        location = 1
+    else:
+        location = 0
+    seen = job.posted_at or job.first_seen_at
+    return location, seen.replace(tzinfo=seen.tzinfo or UTC)
 
 
-def build_user_prompt(job: Job, profile: Profile) -> str:
+def build_user_prompt(job: Job, facts: list[ProfileFact]) -> str:
     if job.salary_min or job.salary_max:
         salary = f"{job.salary_min or '?'}–{job.salary_max or '?'} {job.salary_currency or ''}".strip()
     else:
         salary = "not stated"
     return SCORE_USER_TEMPLATE.format(
-        profile_json=profile_for_prompt(profile),
+        today=datetime.now(UTC).date().isoformat(),
+        facts=format_facts_for_prompt(facts),
         title=job.title,
         company=job.company,
         location=job.location_raw or "not stated",
@@ -125,53 +182,54 @@ def build_user_prompt(job: Job, profile: Profile) -> str:
     )
 
 
-def default_scorer() -> Scorer:
-    model = get_settings().scoring_model
+class LLMScorer:
+    def __init__(self) -> None:
+        self.config = resolve(Task.SCORING)
+        self.model = f"{self.config.provider.value}:{self.config.model}"
 
-    def score(system: str, user: str) -> ScoreBreakdown:
-        return parse_structured(system, user, ScoreBreakdown, model=model)
-
-    return score
+    def __call__(self, system: str, user: str) -> ScoreBreakdown:
+        return parse_structured(system, user, ScoreBreakdown, config=self.config)
 
 
-def load_ready_profile() -> tuple[Profile, int | None]:
-    profile = load_profile()
-    if profile is None:
+def load_candidate() -> Candidate:
+    current = load_current_profile()
+    if current is None:
         raise ProfileNotReady("No profile found. Run `sachin-agent-profile import <cv>` first.")
+    profile, version = current
     if not profile.finalized:
         raise ProfileNotReady(
             "Profile is not finalized. Review it, then set `finalized: true` "
             "(`sachin-agent-profile validate` lists what's missing)."
         )
-    history = list_history(limit=1)
-    return profile, history[0].version if history else None
+    return Candidate(profile=profile, version=version, facts=active_facts(include_pii=False))
 
 
 def score_job(
     job: Job,
-    profile: Profile,
+    candidate: Candidate,
     *,
     scorer: Scorer,
     weights: dict[str, float],
-    profile_version: int | None,
 ) -> StoredScore:
-    reason = prefilter(job, profile)
+    reason = prefilter(job, candidate.profile)
     if reason is not None:
         return StoredScore(
             method=ScoreMethod.PREFILTER,
             overall=PREFILTER_SCORE,
             prefilter_reason=reason,
-            profile_version=profile_version,
+            profile_version=candidate.version,
         )
-    breakdown = scorer(SCORE_SYSTEM_PROMPT, build_user_prompt(job, profile))
+    breakdown = scorer(SCORE_SYSTEM_PROMPT, build_user_prompt(job, candidate.facts))
+    cited = [fact_id for d in Dimension for fact_id in getattr(breakdown, d).evidence]
     return StoredScore(
         method=ScoreMethod.LLM,
         overall=overall_score(breakdown, weights),
         breakdown=breakdown,
         weights=weights,
         prompt_version=SCORE_PROMPT_VERSION,
-        model=get_settings().scoring_model,
-        profile_version=profile_version,
+        model=scorer.model,
+        profile_version=candidate.version,
+        citation_issues=unknown_citations(cited, allowed=(f.id for f in candidate.facts)),
     )
 
 
@@ -181,27 +239,28 @@ def score_pending_jobs(
     rescore: bool = False,
     scorer: Scorer | None = None,
 ) -> ScoringReport:
-    """Score NEW (and with `rescore`, already SCORED) non-duplicate jobs, newest first."""
-    profile, profile_version = load_ready_profile()
-    scorer = scorer or default_scorer()
+    """Score NEW (and with `rescore`, already SCORED) non-duplicate jobs.
+
+    Prefiltered jobs cost nothing and are always processed. `limit` caps LLM
+    calls, spent in `priority` order.
+    """
+    candidate = load_candidate()
+    scorer = scorer or LLMScorer()
     weights = load_weights()
     statuses = [JobStatus.NEW, JobStatus.SCORED] if rescore else [JobStatus.NEW]
     report = ScoringReport()
 
     with get_session() as session:
-        query = (
-            select(Job)
-            .where(col(Job.status).in_(statuses), col(Job.duplicate_of).is_(None))
-            .order_by(col(Job.posted_at).desc().nulls_last(), col(Job.first_seen_at).desc())
-            .limit(limit)
-        )
-        jobs = list(session.exec(query).all())
-        for job in jobs:
+        query = select(Job).where(col(Job.status).in_(statuses), col(Job.duplicate_of).is_(None))
+        free: list[Job] = []
+        paid: list[Job] = []
+        for job in session.exec(query).all():
+            (paid if prefilter(job, candidate.profile) is None else free).append(job)
+        paid.sort(key=lambda j: priority(j, candidate.profile), reverse=True)
+        for job in free + paid[:limit]:
             log = logger.bind(job_id=job.id)
             try:
-                stored = score_job(
-                    job, profile, scorer=scorer, weights=weights, profile_version=profile_version
-                )
+                stored = score_job(job, candidate, scorer=scorer, weights=weights)
             except Exception as exc:
                 log.error(f"scoring failed for {job.title!r} @ {job.company}: {exc}")
                 emit_failure(
@@ -214,6 +273,11 @@ def score_pending_jobs(
                     context={"prompt_version": SCORE_PROMPT_VERSION},
                 )
                 report.failed += 1
+                if getattr(exc, "failure_class", None) == FailureClass.RATE_LIMIT:
+                    # The SDK already waited out short limits; what is left is
+                    # a quota (e.g. tokens/day). Every further call would fail.
+                    report.stopped = f"rate limit: {exc}"[:300]
+                    break
                 continue
 
             job.score = stored.overall
@@ -226,4 +290,7 @@ def score_pending_jobs(
             else:
                 report.scored += 1
                 log.info(f"scored {stored.overall:.2f}: {job.title!r} @ {job.company}")
+            if stored.citation_issues:
+                report.citation_issues += 1
+                log.warning(f"reasons cite unknown facts {stored.citation_issues}")
     return report

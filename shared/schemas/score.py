@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 DimensionValue = Literal[1, 2, 3, 4, 5]
 
@@ -24,6 +24,11 @@ class DimensionScore(BaseModel):
     model_config = ConfigDict(extra="forbid")
     score: DimensionValue
     reason: str
+    # Added with profile facts: ids of the candidate facts the reason relies on.
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="ids of candidate facts (e.g. F0123456789) this reason relies on",
+    )
 
 
 class ScoreBreakdown(BaseModel):
@@ -57,3 +62,6 @@ class StoredScore(BaseModel):
     prompt_version: str | None = None
     model: str | None = None
     profile_version: int | None = None
+    # Cited fact ids that do not exist or were not shown to the LLM: a sign
+    # the reason may describe something the candidate never claimed.
+    citation_issues: list[str] = []

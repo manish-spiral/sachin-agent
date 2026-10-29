@@ -64,6 +64,9 @@ def format_job(job: Job, *, show_score: bool = True) -> str:
         return "\n".join(lines)
     for dim in Dimension:
         d = getattr(stored.breakdown, dim)
-        lines.append(f"  {dim.value:<15} {d.score}  {d.reason}")
+        cites = f"  [{', '.join(d.evidence)}]" if d.evidence else ""
+        lines.append(f"  {dim.value:<15} {d.score}  {d.reason}{cites}")
+    if stored.citation_issues:
+        lines.append(f"  ⚠ cites facts that don't exist: {', '.join(stored.citation_issues)}")
     lines.append(f"  → {stored.breakdown.summary}")
     return "\n".join(lines)

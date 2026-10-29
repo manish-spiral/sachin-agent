@@ -75,6 +75,15 @@ class Certification(BaseModel):
     date: str = ""
 
 
+class Answer(BaseModel):
+    """A fact the CV doesn't hold but applications ask for (notice period,
+    relocation, ...). Stating it here means the agent never has to guess it."""
+
+    model_config = ConfigDict(extra="forbid")
+    question: str
+    answer: str
+
+
 class Profile(BaseModel):
     """Frozen top-level shape. Only additive changes permitted."""
 
@@ -88,6 +97,7 @@ class Profile(BaseModel):
     skills: Skills = Field(default_factory=Skills)
     projects: list[Project] = Field(default_factory=list)
     certifications: list[Certification] = Field(default_factory=list)
+    answers: list[Answer] = Field(default_factory=list)
     finalized: bool = False
 
         # --- Anti-fabrication gate -------------------------------------------

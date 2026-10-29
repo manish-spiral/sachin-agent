@@ -17,12 +17,14 @@ from matcher.calibrate import (
     sample_for_labeling,
 )
 from matcher.cli import app
+from matcher.prompts import SCORE_PROMPT_VERSION
 from matcher.review import JobNotFound, decide, find_job, review_queue
 from matcher.scoring import (
     DEALBREAKER_CAP,
     DEFAULT_WEIGHTS,
     ProfileNotReady,
     build_user_prompt,
+    load_candidate,
     overall_score,
     prefilter,
     score_pending_jobs,
@@ -66,6 +68,8 @@ def _breakdown(**scores: int) -> ScoreBreakdown:
 
 
 class FakeScorer:
+    model = "fake:model"
+
     def __init__(self, breakdown: ScoreBreakdown | None = None, fail_on: str | None = None):
         self.breakdown = breakdown or _breakdown(role_match=5, skills_overlap=4)
         self.fail_on = fail_on
@@ -142,10 +146,19 @@ def test_prefilter_drops_unrelated_titles_only():
     assert prefilter(_job("2", title="Senior Product Designer"), profile) is not None
     assert prefilter(_job("3", title="Staff Backend Engineer, Payments"), profile) is None
     assert prefilter(_job("4", title="Software Engineer"), profile) is None
+    assert prefilter(_job("5", title="Writer, Content Marketing"), profile) is not None
+    assert prefilter(_job("6", title="Backend Developer (Python)"), profile) is None
+    assert prefilter(_job("7", title="Senior Staff Designer"), profile) is not None  # level words don't count
+    assert prefilter(_job("8", title="Engineering Manager, Payments"), profile) is None  # LLM decides
+    assert prefilter(_job("9", title="Account Executive, Platforms"), _profile(target_titles=["Platform Engineer"])) is not None
+    mts = _profile(target_titles=["Member of Technical Staff"])
+    assert prefilter(_job("10", title="Member of Technical Staff, Security"), mts) is None
+    assert prefilter(_job("11", title="Chief of Staff"), mts) is not None
 
 
-def test_prompt_has_no_contact_pii():
-    prompt = build_user_prompt(_job("1"), _profile())
+def test_prompt_is_facts_only_without_contact_pii(ready):
+    prompt = build_user_prompt(_job("1"), load_candidate().facts)
+    assert "[F" in prompt and "(experience_bullet) At Acme: Built X" in prompt
     assert "sachin@example.com" not in prompt
     assert "99999" not in prompt
     assert "Sachin" not in prompt
@@ -180,7 +193,7 @@ def test_scores_new_jobs_and_is_idempotent(ready):
     stored = StoredScore.model_validate(_get(good.id).score_breakdown)
     assert _get(good.id).status == JobStatus.SCORED
     assert stored.method == ScoreMethod.LLM
-    assert stored.prompt_version == "score_job_v1"
+    assert stored.prompt_version == SCORE_PROMPT_VERSION
     assert stored.profile_version == 1
     assert stored.breakdown is not None and stored.breakdown.role_match.score == 5
 
@@ -302,7 +315,7 @@ def test_stats_cli(ready):
 
 
 def test_run_cli_without_profile_explains(fresh_db, monkeypatch):
-    monkeypatch.setattr("matcher.scoring.load_profile", lambda: None)
+    monkeypatch.setattr("matcher.scoring.load_current_profile", lambda: None)
     result = CliRunner().invoke(app, ["run"])
     assert result.exit_code == 1
     assert "No profile found" in result.output
@@ -366,3 +379,72 @@ def test_calibrate_cli_label_then_report_apply(ready):
     report = runner.invoke(app, ["calibrate", "report", "--apply"])
     assert report.exit_code == 0, report.output
     assert "agreement" in report.output
+
+
+def test_citations_of_shown_facts_pass_and_invented_ones_are_flagged(ready):
+    real = next(f.id for f in load_candidate().facts if "Built X" in f.text)
+    cited = _breakdown(role_match=5)
+    cited.role_match.evidence = [real]
+    cited.skills_overlap.evidence = ["F0000000000", "not-an-id"]
+    _store(_job("1"))
+
+    report = score_pending_jobs(scorer=FakeScorer(cited))
+
+    stored = StoredScore.model_validate(_get(make_job_id("greenhouse:globex", "1")).score_breakdown)
+    assert stored.citation_issues == ["F0000000000", "not-an-id"]
+    assert report.citation_issues == 1
+    review = CliRunner().invoke(app, ["review", "--list"])
+    assert real in review.output
+    assert "cites facts that don't exist: F0000000000" in review.output
+
+
+def test_pii_fact_cannot_be_cited_even_if_real(ready):
+    from shared.profile.facts import active_facts
+
+    email = next(f.id for f in active_facts(include_pii=True) if f.path == "identity.email")
+    leaked = _breakdown()
+    leaked.visa.evidence = [email]
+    _store(_job("1"))
+
+    score_pending_jobs(scorer=FakeScorer(leaked))
+
+    stored = StoredScore.model_validate(_get(make_job_id("greenhouse:globex", "1")).score_breakdown)
+    assert stored.citation_issues == [email]
+
+
+def test_limit_caps_llm_calls_and_spends_them_on_reachable_jobs_first(ready):
+    from datetime import UTC, datetime
+
+    save_profile(_profile(preferred_locations=["bengaluru"]))
+    far = _job("1", location_norm="berlin", posted_at=datetime(2026, 9, 1, tzinfo=UTC))
+    near = _job("2", location_norm="bengaluru", posted_at=datetime(2026, 1, 1, tzinfo=UTC))
+    remote = _job("3", location_norm="remote", posted_at=datetime(2026, 5, 1, tzinfo=UTC))
+    unrelated = [_job(f"x{i}", title="Account Executive") for i in range(3)]
+    _store(far, near, remote, *unrelated)
+    scorer = FakeScorer()
+
+    report = score_pending_jobs(limit=2, scorer=scorer)
+
+    assert (report.scored, report.prefiltered) == (2, 3)
+    assert _get(near.id).status == JobStatus.SCORED
+    assert _get(remote.id).status == JobStatus.SCORED
+    assert _get(far.id).status == JobStatus.NEW
+
+
+def test_rate_limit_stops_the_run(ready):
+    from matcher.llm import LLMError
+
+    class QuotaExhausted(FakeScorer):
+        def __call__(self, system: str, user: str) -> ScoreBreakdown:
+            self.prompts.append(user)
+            raise LLMError("tokens per day", failure_class=FailureClass.RATE_LIMIT)
+
+    _store(_job("1"), _job("2"), _job("3"))
+    scorer = QuotaExhausted()
+
+    report = score_pending_jobs(scorer=scorer)
+
+    assert len(scorer.prompts) == 1
+    assert report.failed == 1 and report.stopped and "tokens per day" in report.stopped
+    with get_session() as s:
+        assert len(s.exec(select(FailureEvent)).all()) == 1

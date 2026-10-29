@@ -17,6 +17,9 @@ def _test_env():
         os.environ["SNAPSHOT_DIR"] = tmp
         os.environ["PROFILE_DATA_DIR"] = tmp
         os.environ["BROWSER_PROFILE_DIR"] = tmp
+        # Tests must never reach a real LLM, whatever the developer's .env holds.
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"):
+            os.environ[key] = ""
 
         # Clear caches populated before env was set.
         from shared.config import reset_settings
