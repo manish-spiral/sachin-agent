@@ -69,3 +69,9 @@ class Job(SQLModel, table=True):
     title_norm: str | None = None
     company_norm: str | None = None
     duplicate_of: str | None = None
+
+    # Phase 6 (additive): matcher's structured reading of the JD (must-haves,
+    # keywords). Cached so tailoring a resume twice costs one extraction.
+    requirements: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )

@@ -22,6 +22,7 @@ GREENHOUSE_PAYLOAD = {
         {
             "id": 101,
             "title": " Backend Engineer ",
+            "company_name": "Acme Inc.",
             "location": {"name": "Remote - US"},
             "content": "&lt;p&gt;Build &amp;amp; ship&lt;/p&gt;",
             "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
@@ -94,6 +95,8 @@ def test_parse_dt_formats():
 def test_strip_html():
     assert strip_html("<p>a &amp; b</p>\n<br/> c") == "a & b c"
     assert strip_html(None) == ""
+    # Greenhouse double-encodes: escaped tags must not survive as text.
+    assert strip_html("&lt;h2&gt;&lt;strong&gt;Who we are&lt;/strong&gt;&lt;/h2&gt;&lt;p&gt;R&amp;amp;D&lt;/p&gt;") == "Who we are R&D"
 
 
 # --- normalize -------------------------------------------------------------
@@ -110,6 +113,7 @@ def test_greenhouse_normalize():
     assert job.remote is True
     assert job.posted_at is not None
     assert job.url.endswith("/101")
+    assert job.description_raw == "Build & ship"
 
 
 def test_lever_normalize_epoch_ms_and_workplace_type():
@@ -185,7 +189,10 @@ def test_run_inserts_and_is_idempotent(fresh_db):
     for _ in range(2):
         asyncio.run(run_all_sources(["greenhouse"], companies_override=["acme"], transport=transport))
 
-    assert len(_jobs()) == 2
+    jobs = _jobs()
+    assert len(jobs) == 2
+    # Display name from the payload when present, board slug otherwise.
+    assert sorted(j.company for j in jobs) == ["Acme Inc.", "acme"]
     with get_session() as s:
         health = s.get(SourceHealth, "greenhouse:acme")
     assert health is not None

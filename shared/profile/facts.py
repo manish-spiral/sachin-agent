@@ -62,9 +62,12 @@ def _drafts(p: Profile) -> list[_Draft]:
 
     auth = p.work_authorization
     if auth.requires_sponsorship is not None:
+        # Scope matters: a bare "Requires visa sponsorship" made the scorer
+        # reject a job in the candidate's own country (seen in calibration).
         need = "Requires" if auth.requires_sponsorship else "Does not require"
+        scope = f" to work outside {', '.join(auth.authorized_countries)}" if auth.authorized_countries else ""
         out.append(_Draft(FactKind.WORK_AUTHORIZATION, "requires_sponsorship",
-                          f"{need} visa sponsorship", "work_authorization.requires_sponsorship"))
+                          f"{need} visa sponsorship{scope}", "work_authorization.requires_sponsorship"))
     for i, country in enumerate(auth.authorized_countries):
         out.append(_Draft(FactKind.WORK_AUTHORIZATION, f"country|{country}",
                           f"Authorized to work in {country}", f"work_authorization.authorized_countries[{i}]",

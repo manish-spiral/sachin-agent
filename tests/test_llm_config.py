@@ -21,6 +21,7 @@ Skills: Python, Go, PostgreSQL"""
 def env(monkeypatch):
     for key in ("OPENAI_API_KEY", "GROQ_API_KEY", "LLM_PROVIDER", "SCORING_MODEL", "EXTRACTION_MODEL"):
         monkeypatch.setenv(key, "")
+    monkeypatch.setenv("LLM_MODELS", "{}")
 
     def apply(**values: str) -> None:
         for key, value in values.items():
@@ -43,6 +44,7 @@ def test_groq_key_alone_selects_groq_with_reasoning(env):
     assert scoring.provider == Provider.GROQ
     assert scoring.model == "openai/gpt-oss-120b"
     assert scoring.request_options() == {"reasoning": {"effort": "low"}}
+    assert resolve(Task.RESUME).request_options() == {"reasoning": {"effort": "medium"}, "max_output_tokens": 8000}
     assert extracting.request_options() == {"reasoning": {"effort": "medium"}}
 
 
@@ -126,3 +128,11 @@ def test_extraction_keeps_least_bad_draft(env, monkeypatch):
     profile = extraction.extract_profile_from_text(CV)
 
     assert profile.education  # the draft with one issue, not two
+
+
+def test_per_task_model_override_json(env):
+    env(GROQ_API_KEY="gsk_test", LLM_MODELS='{"resume": "openai/gpt-oss-20b"}')
+    assert resolve(Task.RESUME).model == "openai/gpt-oss-20b"
+    assert resolve(Task.KEYWORDS).model == "openai/gpt-oss-20b"
+    assert resolve(Task.VERIFY).model == "qwen/qwen3.8-27b"
+    assert resolve(Task.VERIFY).request_options() == {"max_output_tokens": 4000}

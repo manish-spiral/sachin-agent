@@ -2,6 +2,7 @@
 
 from shared.schemas.adapter import AdapterVersion
 from shared.schemas.application import Application
+from shared.schemas.document import TailoredDocument
 from shared.schemas.failure import FailureEvent
 from shared.schemas.job import Job
 from shared.schemas.profile_fact import ProfileFact
@@ -20,4 +21,5 @@ __all__ = [
     "Skill",
     "SnapshotIndex",
     "SourceHealth",
+    "TailoredDocument",
 ]

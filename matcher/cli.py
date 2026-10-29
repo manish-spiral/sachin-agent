@@ -147,6 +147,42 @@ def stats() -> None:
             typer.echo(f"  {dim.value:<15} {mean:.2f}")
 
 
+@app.command()
+def tailor(
+    job_id: Annotated[str | None, typer.Argument(help="Job id or unique prefix.")] = None,
+    top: Annotated[
+        int | None, typer.Option("--top", help="Tailor the N best-scored jobs instead.")
+    ] = None,
+    cover_letter: Annotated[bool, typer.Option("--cover-letter/--no-cover-letter")] = True,
+) -> None:
+    """Write a verified, ATS-safe resume (and cover letter) PDF for a job."""
+    from matcher.llm import StructuredLLM
+    from matcher.tailor import TailorError, tailor_job
+
+    if (job_id is None) == (top is None):
+        typer.echo("✗ Give a JOB_ID or --top N.", err=True)
+        raise typer.Exit(2)
+    try:
+        ids = [find_job(job_id).id] if job_id else [j.id for j in review_queue(limit=top or 0)]
+        llm = StructuredLLM()
+    except (JobNotFound, LLMNotConfigured) as exc:
+        typer.echo(f"✗ {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    for jid in ids:
+        try:
+            report = tailor_job(jid, llm=llm, cover_letter=cover_letter)
+        except TailorError as exc:
+            typer.echo(f"✗ {exc}", err=True)
+            raise typer.Exit(1) from exc
+        for doc in filter(None, (report.resume, report.cover_letter)):
+            how = "profile-only fallback" if doc.fallback else f"tailored, {doc.attempts} attempt(s)"
+            rejected = f", {len(doc.violations)} violation(s) caught in rejected drafts" if doc.violations else ""
+            typer.echo(f"{doc.kind.value:<13} {doc.pdf_path}  ({how}{rejected})")
+        status = "ATS check passed" if not report.ats_problems else f"ATS problems: {report.ats_problems}"
+        typer.echo(f"  {status}")
+
+
 @calibrate_app.command("label")
 def calibrate_label(
     n: Annotated[int, typer.Option("--n", help="Jobs to label this session.")] = 20,

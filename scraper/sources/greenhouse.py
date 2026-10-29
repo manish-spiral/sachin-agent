@@ -23,7 +23,9 @@ class GreenhouseSource(BaseSource):
         return [
             RawJob(
                 source=f"greenhouse:{company}",
-                company=company,
+                # The board slug ("stripe") is for URLs; the payload has the
+                # display name ("Stripe") that letters and forms should use.
+                company=j.get("company_name") or company,
                 external_id=str(j.get("id", "")),
                 payload=j,
             )

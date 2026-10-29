@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ doc.name }} — Cover letter</title>
+<style>
+  @page { size: A4; margin: 22mm 22mm; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; line-height: 1.45; color: #000; margin: 0; }
+  h1 { font-size: 14pt; margin: 0 0 2pt; }
+  .contact { margin: 0 0 18pt; }
+  p { margin: 0 0 10pt; }
+</style>
+</head>
+<body>
+<h1>{{ doc.name }}</h1>
+<p class="contact">{{ doc.contact | join(" | ") }}</p>
+<p>Dear {{ doc.company }} hiring team,</p>
+{%- for paragraph in doc.paragraphs %}
+<p>{{ paragraph }}</p>
+{%- endfor %}
+<p>Kind regards,<br>{{ doc.name }}</p>
+</body>
+</html>

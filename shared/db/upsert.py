@@ -13,6 +13,7 @@ from shared.schemas.job import Job
 _UPDATE_FIELDS = (
     "last_seen_at",
     "title",
+    "company",
     "description_raw",
     "url",
     "posted_at",

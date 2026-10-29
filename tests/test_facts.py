@@ -59,7 +59,9 @@ def test_save_explodes_profile_into_facts(fresh_db):
     bullet = by_path["experience[0].bullets[0]"]
     assert bullet.kind == FactKind.EXPERIENCE_BULLET
     assert bullet.parent_id == by_path["experience[0]"].id
-    assert by_path["work_authorization.requires_sponsorship"].text == "Does not require visa sponsorship"
+    assert by_path["work_authorization.requires_sponsorship"].text == (
+        "Does not require visa sponsorship to work outside India"
+    )
     assert by_path["answers[0]"].text == "Q: Notice period? A: 30 days"
     assert by_path["identity.email"].pii is True
     assert by_path["identity.location"].pii is False
@@ -160,3 +162,17 @@ def test_import_refuses_to_overwrite_existing_profile(fresh_db, tmp_path):
     assert result.exit_code == 1
     assert "--force" in result.output
     assert len(list_history()) == 1
+
+
+def test_fact_wording_changes_reach_the_db_on_load(fresh_db):
+    save_profile(_profile())
+    with get_session() as s:
+        fact = s.exec(select(ProfileFact).where(ProfileFact.path == "identity.location")).one()
+        fact.text = "stale wording from an older release"
+        s.add(fact)
+        s.commit()
+
+    load_current_profile()
+
+    assert "Based in Pune" in {f.text for f in active_facts()}
+    assert len(list_history()) == 1  # same profile: no new version

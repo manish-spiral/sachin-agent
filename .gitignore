@@ -12,8 +12,8 @@ data/
 logs/
 snapshots/
 browser_profile/
-profile-data/*.json
-profile-data/*.md
+# Applicant data: profile, generated resumes and cover letters (all PII)
+profile-data/*
 !profile-data/.gitkeep
 
 # Secrets

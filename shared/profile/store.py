@@ -13,7 +13,7 @@ from sqlmodel import col, select
 
 from shared.db.engine import get_session
 from shared.paths import profile_json_path
-from shared.profile.facts import active_facts, sync_facts
+from shared.profile.facts import sync_facts
 from shared.schemas.profile import Profile
 from shared.schemas.profile_record import ProfileRecord
 
@@ -107,10 +107,10 @@ def load_current_profile() -> tuple[Profile, int] | None:
         return None
     latest = list_history(limit=1)
     if latest and latest[0].profile_json == profile.model_dump(mode="json"):
-        if not active_facts(include_pii=True):
-            # Profile saved before profile_facts existed: backfill its facts.
-            with get_session() as s:
-                sync_facts(s, profile, version=latest[0].version)
+        # Re-derive facts every load: cheap and idempotent, and it carries fixes
+        # to fact wording (or a profile saved before facts existed) into the DB.
+        with get_session() as s:
+            sync_facts(s, profile, version=latest[0].version)
         return profile, latest[0].version
     record = save_profile(profile, source="manual", notes="hand edit of profile.json")
     return profile, record.version

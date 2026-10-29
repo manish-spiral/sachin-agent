@@ -36,3 +36,11 @@ def scoring_weights_path() -> Path:
 
 def calibration_path() -> Path:
     return Path(get_settings().data_dir) / "calibration.json"
+
+
+def resumes_dir() -> Path:
+    return Path(get_settings().profile_data_dir) / "resumes"
+
+
+def cover_letters_dir() -> Path:
+    return Path(get_settings().profile_data_dir) / "cover_letters"

@@ -15,8 +15,11 @@ def strip_html(value: str | None) -> str:
     """HTML → plain text. Good enough for matching; Phase 4 may improve."""
     if not value:
         return ""
-    text = html.unescape(_TAG_RE.sub(" ", value))
-    return _WS_RE.sub(" ", text).strip()
+    # Greenhouse sends HTML that is itself escaped ("&lt;h2&gt;"): unescape
+    # before stripping, or the tags survive as text. The second unescape
+    # resolves entities that were inside the escaped markup ("&amp;amp;").
+    text = _TAG_RE.sub(" ", html.unescape(value))
+    return _WS_RE.sub(" ", html.unescape(text)).strip()
 
 
 def parse_dt(value: str | int | float | None) -> datetime | None:
