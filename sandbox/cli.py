@@ -124,6 +124,42 @@ def suite(
 
 
 @app.command()
+def heal(
+    failure_id: Annotated[str | None, typer.Argument(help="A selector-drift failure id.")] = None,
+    pending: Annotated[bool, typer.Option("--pending", help="Heal every unhealed drift failure.")] = False,
+    llm: Annotated[bool, typer.Option("--llm/--no-llm", help="Also ask the LLM for candidates.")] = False,
+    threshold: Annotated[float, typer.Option("--threshold")] = 0.9,
+) -> None:
+    """Propose replacement locators, replay them offline, promote the best."""
+    from sandbox.healer import HealError, pending_drift_failures
+    from sandbox.healer import heal as run_heal
+    from shared.llm import LLMNotConfigured, StructuredLLM, Task, resolve
+
+    ids = [e.id for e in pending_drift_failures()] if pending else [failure_id] if failure_id else []
+    if not ids:
+        typer.echo("Nothing to heal (give a FAILURE_ID or --pending).")
+        return
+    model = None
+    if llm:
+        try:
+            resolve(Task.HEAL)
+            model = StructuredLLM()
+        except LLMNotConfigured:
+            typer.echo("No LLM configured: page-derived candidates only.")
+    for fid in ids:
+        try:
+            report = run_heal(fid, llm=model, threshold=threshold)
+        except HealError as exc:
+            typer.echo(f"✗ {fid}: {exc}")
+            continue
+        typer.echo(f"{fid[:8]} broken: {report.broken}; baseline {report.baseline_rate:.0%}")
+        for t in report.trials:
+            typer.echo(f"   {t.intent:<11} {t.origin:<3} {t.locator.strategy.value}={t.locator.value!r:<36} "
+                       f"now {t.eval_rate:.0%}  all {t.overall_rate:.0%}")
+        typer.echo(f"   → {report.reason}")
+
+
+@app.command()
 def prune(days: Annotated[int | None, typer.Option("--days")] = None) -> None:
     """Delete snapshot runs older than the retention window."""
     keep = days if days is not None else get_settings().snapshot_retention_days

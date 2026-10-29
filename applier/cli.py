@@ -225,6 +225,35 @@ def answer(application_id: Annotated[str, typer.Argument(help="Paused applicatio
     typer.echo(f"Saved. Continue with: sachin-agent-applier resume {application.id[:12]}")
 
 
+@app.command()
+def adapters(domain: Annotated[str, typer.Argument(help="e.g. greenhouse.io")]) -> None:
+    """Adapter versions for a domain, with provenance."""
+    from applier.adapters.versions import versions
+
+    rows = versions(domain)
+    if not rows:
+        typer.echo(f"No versions for {domain} yet (the built-in spec registers on first use).")
+    for row in rows:
+        mark = "*" if row.is_active else " "
+        # Built-in specs were never replayed before promotion: no rate to show.
+        rate = "n/a" if row.source == "builtin" else f"{row.snapshot_pass_rate:.0%}"
+        typer.echo(f"{mark} v{row.version:<3} {row.source:<15} pass {rate:>4}  "
+                   f"{row.promoted_at:%Y-%m-%d %H:%M}  {row.fix_summary}")
+
+
+@app.command()
+def rollback(domain: str, version: int) -> None:
+    """Make an earlier adapter version active again."""
+    from applier.adapters.versions import rollback as do_rollback
+
+    try:
+        row = do_rollback(domain, version)
+    except LookupError as exc:
+        typer.echo(f"✗ {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{domain}: v{row.version} is active ({row.source}).")
+
+
 consent_app = typer.Typer(help="Your per-domain consent decisions", no_args_is_help=True)
 app.add_typer(consent_app, name="consent")
 

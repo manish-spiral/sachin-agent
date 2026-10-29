@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     extraction_model: str | None = None
     scoring_model: str | None = None
     # Per-task model overrides as JSON, e.g. LLM_MODELS='{"resume": "openai/gpt-oss-20b"}'.
-    # Tasks: extraction, scoring, keywords, resume, cover_letter, verify, form_answer, diagnose.
+    # Tasks: extraction, scoring, keywords, resume, cover_letter, verify, form_answer, diagnose, heal.
     llm_models: dict[str, str] = {}
 
     # Orchestration (Phase 9)

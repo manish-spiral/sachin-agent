@@ -204,6 +204,11 @@ def _pause(app: Application, job: Job, reason: PauseReason, session: BrowserSess
 
 def _fail(app: Application, job: Job, log: StepLog, session: BrowserSession | None,
           exc: Exception, failure_class: FailureClass, phase: str) -> Application:
+    context: dict[str, object] = {"last_step": app.last_step}
+    if isinstance(exc, SelectorNotFound):
+        # What the healer needs: which intent broke and the locator that failed.
+        context |= {"intent": exc.intent, "adapter_version": app.adapter_version_id,
+                    "locator": exc.locator.model_dump(exclude_none=True)}
     log.record(f"failed_{phase}", session, error=str(exc))
     emit_failure(
         source_module="applier",
@@ -214,7 +219,7 @@ def _fail(app: Application, job: Job, log: StepLog, session: BrowserSession | No
         job_id=job.id,
         application_id=app.id,
         snapshot_id=log.snapshot_id,
-        context={"last_step": app.last_step},
+        context=context,
     )
     app_transition(app, ApplicationStatus.FAILED)
     return _save(app)

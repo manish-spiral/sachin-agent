@@ -49,3 +49,8 @@ def cover_letters_dir() -> Path:
 def application_dir(application_id: str) -> Path:
     """Screenshots, DOM dumps, browser state and the step log of one application."""
     return Path(get_settings().data_dir) / "applications" / application_id
+
+
+def adapter_versions_dir(domain: str) -> Path:
+    """Promoted adapter specs: <data>/adapters/<domain>/v<N>.json."""
+    return Path(get_settings().data_dir) / "adapters" / domain

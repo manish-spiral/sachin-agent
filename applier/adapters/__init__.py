@@ -26,5 +26,8 @@ def spec_for_url(url: str) -> AdapterSpec | None:
 
 
 def adapter_for_url(url: str) -> FormAdapter | None:
+    """The *active* version of the matching adapter (healed specs included)."""
+    from applier.adapters.versions import active_spec
+
     spec = spec_for_url(url)
-    return FormAdapter(spec) if spec else None
+    return FormAdapter(active_spec(spec)) if spec else None
