@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
-from sqlmodel import select
+from sqlmodel import col, select
 
 from applier.adapters import adapter_for_url
 from applier.adapters.base import FillReport
@@ -23,11 +23,12 @@ from applier.context import Answer, ApplicantContext
 from applier.detectors import Blocker, click_consent, detect_blocker
 from applier.human import Absent, Human
 from applier.memory import consents_for, remember_answer, remember_consent
-from applier.notify import notify
 from applier.session import BrowserSession
 from shared.config import get_settings
 from shared.db.engine import get_session
 from shared.db.failures import domain_from_url, emit_failure
+from shared.killswitch import is_killed
+from shared.notify import notify
 from shared.paths import application_dir
 from shared.profile.facts import active_facts
 from shared.schemas.application import Application, ApplicationStatus, PauseReason
@@ -237,6 +238,28 @@ def _ask_human(report: FillReport, domain: str, human: Human, log: StepLog) -> b
     return complete
 
 
+def applications_today() -> int:
+    """Applications started since UTC midnight: what the daily cap counts."""
+    midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    with get_session() as s:
+        return len(s.exec(select(Application).where(Application.created_at >= midnight)).all())
+
+
+def approved_ready(limit: int) -> list[Job]:
+    """Approved jobs with a resume and no finished application, best first."""
+    finished = select(Application.job_id).where(
+        col(Application.status).in_([ApplicationStatus.SUBMITTED, ApplicationStatus.ABANDONED])
+    )
+    has_resume = select(TailoredDocument.job_id).where(TailoredDocument.kind == DocumentKind.RESUME)
+    with get_session() as s:
+        return list(s.exec(
+            select(Job)
+            .where(Job.status == JobStatus.APPROVED, col(Job.id).in_(has_resume), col(Job.id).not_in(finished))
+            .order_by(col(Job.score).desc())
+            .limit(limit)
+        ).all())
+
+
 def run_application(
     job_id: str,
     *,
@@ -246,6 +269,8 @@ def run_application(
     inferrer: InferrerFactory | None = None,
 ) -> Application:
     human = human or Absent()
+    if is_killed():
+        raise ApplyError("kill switch is on")
     job, app = _prepare(job_id)
     log = StepLog(app, application_dir(app.id))
     url = application_url(job)
@@ -287,6 +312,8 @@ def run_application(
         except Exception as exc:
             return _fail(app, job, log, session, exc, FailureClass.UNKNOWN, "fill")
 
+        if is_killed():
+            return _pause(app, job, PauseReason.KILL_SWITCH, session, log, "kill switch thrown mid-run")
         if not human.approve(app, report):
             return _pause(app, job, PauseReason.SUBMIT_APPROVAL, session, log, "ready to submit")
 

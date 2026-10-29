@@ -25,6 +25,8 @@ class PauseReason(StrEnum):
     ADAPTER_APPROVAL = "adapter_approval"
     # Phase 7 (additive): the form is filled; a human must approve the submit.
     SUBMIT_APPROVAL = "submit_approval"
+    # Phase 9 (additive): the global kill switch was thrown mid-run.
+    KILL_SWITCH = "kill_switch"
 
 
 def _now() -> datetime:

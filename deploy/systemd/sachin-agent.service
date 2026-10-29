@@ -1,0 +1,14 @@
+# Runs the pipeline once. Installed as a *user* unit (no root needed):
+#   make install-timer
+# Edit WorkingDirectory if the repo lives elsewhere.
+[Unit]
+Description=sachin-agent pipeline (scrape, score, tailor, apply)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documents/projects/sachin-agent
+ExecStart=%h/Documents/projects/sachin-agent/.venv/bin/sachin-agent-run run-all --trigger timer
+# A run that hangs must not block tomorrow's.
+TimeoutStartSec=4h
+Nice=10

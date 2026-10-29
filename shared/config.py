@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     # Tasks: extraction, scoring, keywords, resume, cover_letter, verify, form_answer.
     llm_models: dict[str, str] = {}
 
+    # Orchestration (Phase 9)
+    # Kill switch: KILL_SWITCH env var or a data_dir/KILL file (shared/killswitch.py).
+    max_applications_per_day: int = 5
+    # Unset: only jobs a human approved are applied to. Set: scored jobs at or
+    # above this score are approved automatically (submission still pauses).
+    auto_approve_min_score: float | None = None
+    exclude_companies: list[str] = []
+    exclude_title_keywords: list[str] = []
+    score_llm_calls_per_run: int = 60
+    tailor_per_run: int = 10
+
 
 _settings: Settings | None = None
 

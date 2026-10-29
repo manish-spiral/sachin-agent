@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly sachin-agent pipeline
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+# Spread load on the job boards; catch up after the machine was off.
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

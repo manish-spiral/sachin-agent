@@ -33,3 +33,22 @@ def test_no_cross_module_imports(module: str):
             if root in MODULES and root != module:
                 violations.append(f"{py_file.relative_to(ROOT)} imports {imp}")
     assert not violations, "Cross-module imports detected:\n" + "\n".join(violations)
+
+def test_orchestrator_only_talks_through_subprocesses():
+    """The orchestrator composes the modules by running their CLIs; importing
+    them would couple it to their internals."""
+    violations = []
+    for py_file in (ROOT / "orchestrator").rglob("*.py"):
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        violations += [f"{py_file.name} imports {imp}" for imp in _iter_imports(tree)
+                       if imp.split(".")[0] in MODULES]
+    assert not violations, violations
+
+
+def test_shared_never_imports_modules():
+    violations = []
+    for py_file in (ROOT / "shared").rglob("*.py"):
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        violations += [f"{py_file.relative_to(ROOT)} imports {imp}" for imp in _iter_imports(tree)
+                       if imp.split(".")[0] in MODULES | {"orchestrator"}]
+    assert not violations, violations

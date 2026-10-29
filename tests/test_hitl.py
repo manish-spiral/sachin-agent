@@ -13,10 +13,10 @@ from applier.answering import FactInferrer, InferredAnswer
 from applier.context import Answer, AnswerSource, ApplicantContext
 from applier.detectors import detect_captcha, detect_consent, detect_login_wall
 from applier.memory import consents_for
-from applier.notify import notify
 from applier.runner import make_application_id, run_application
 from shared.config import reset_settings
 from shared.db.engine import get_session
+from shared.notify import notify
 from shared.paths import application_dir
 from shared.profile.facts import active_facts
 from shared.profile.store import load_profile

@@ -20,6 +20,7 @@ from matcher.llm import parse_structured
 from matcher.prompts import SCORE_PROMPT_VERSION, SCORE_SYSTEM_PROMPT, SCORE_USER_TEMPLATE
 from shared.db.engine import get_session
 from shared.db.failures import domain_from_url, emit_failure
+from shared.killswitch import is_killed
 from shared.llm import Task, resolve
 from shared.paths import scoring_weights_path
 from shared.profile.facts import active_facts, format_facts_for_prompt, unknown_citations
@@ -258,6 +259,9 @@ def score_pending_jobs(
             (paid if prefilter(job, candidate.profile) is None else free).append(job)
         paid.sort(key=lambda j: priority(j, candidate.profile), reverse=True)
         for job in free + paid[:limit]:
+            if is_killed():
+                report.stopped = "kill switch"
+                break
             log = logger.bind(job_id=job.id)
             try:
                 stored = score_job(job, candidate, scorer=scorer, weights=weights)

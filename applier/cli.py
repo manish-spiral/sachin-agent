@@ -111,6 +111,37 @@ def resume(
     _report(application)
 
 
+@app.command("run-approved")
+def run_approved(
+    limit: Annotated[int | None, typer.Option("--limit", help="Defaults to the daily cap.")] = None,
+) -> None:
+    """Fill applications for approved jobs, within the daily cap. Unattended:
+    every application pauses before submit and you are notified."""
+    from applier.runner import applications_today, approved_ready
+    from shared.killswitch import is_killed
+
+    cap = get_settings().max_applications_per_day
+    remaining = max(cap - applications_today(), 0)
+    budget = min(remaining, limit) if limit is not None else remaining
+    if budget == 0:
+        typer.echo(f"Daily cap reached ({cap} applications today).")
+        return
+    outcomes: dict[str, int] = {}
+    for job in approved_ready(budget):
+        if is_killed():
+            typer.echo("Kill switch on; stopping.")
+            break
+        try:
+            result = run_application(job.id, human=Absent(), session_factory=_session(False), inferrer=_inferrer())
+        except ApplyError as exc:
+            typer.echo(f"✗ {job.title} @ {job.company}: {exc}", err=True)
+            continue
+        key = result.status.value + (f"/{result.pause_reason.value}" if result.pause_reason else "")
+        outcomes[key] = outcomes.get(key, 0) + 1
+        _report(result)
+    typer.echo(f"applications: {outcomes or 'none'}")
+
+
 @app.command("list")
 def list_applications(
     status: Annotated[ApplicationStatus | None, typer.Option("--status")] = None,

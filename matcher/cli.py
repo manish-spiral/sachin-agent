@@ -17,7 +17,15 @@ from matcher.calibrate import (
     save_labels,
     save_weights,
 )
-from matcher.review import JobNotFound, decide, find_job, format_job, review_queue
+from matcher.review import (
+    JobNotFound,
+    approved_without_documents,
+    auto_approve,
+    decide,
+    find_job,
+    format_job,
+    review_queue,
+)
 from matcher.scoring import ProfileNotReady, load_weights, score_pending_jobs
 from shared.db.engine import get_session
 from shared.llm import LLMNotConfigured
@@ -153,23 +161,36 @@ def tailor(
     top: Annotated[
         int | None, typer.Option("--top", help="Tailor the N best-scored jobs instead.")
     ] = None,
+    approved: Annotated[
+        int | None, typer.Option("--approved", help="Tailor up to N approved jobs lacking documents.")
+    ] = None,
     cover_letter: Annotated[bool, typer.Option("--cover-letter/--no-cover-letter")] = True,
 ) -> None:
     """Write a verified, ATS-safe resume (and cover letter) PDF for a job."""
     from matcher.llm import StructuredLLM
     from matcher.tailor import TailorError, tailor_job
 
-    if (job_id is None) == (top is None):
-        typer.echo("✗ Give a JOB_ID or --top N.", err=True)
+    if sum(x is not None for x in (job_id, top, approved)) != 1:
+        typer.echo("✗ Give exactly one of JOB_ID, --top N or --approved N.", err=True)
         raise typer.Exit(2)
     try:
-        ids = [find_job(job_id).id] if job_id else [j.id for j in review_queue(limit=top or 0)]
+        if job_id:
+            ids = [find_job(job_id).id]
+        elif approved is not None:
+            ids = [j.id for j in approved_without_documents(approved)]
+        else:
+            ids = [j.id for j in review_queue(limit=top or 0)]
         llm = StructuredLLM()
     except (JobNotFound, LLMNotConfigured) as exc:
         typer.echo(f"✗ {exc}", err=True)
         raise typer.Exit(1) from exc
 
+    from shared.killswitch import is_killed
+
     for jid in ids:
+        if is_killed():
+            typer.echo("Kill switch on; stopping.")
+            break
         try:
             report = tailor_job(jid, llm=llm, cover_letter=cover_letter)
         except TailorError as exc:
@@ -181,6 +202,21 @@ def tailor(
             typer.echo(f"{doc.kind.value:<13} {doc.pdf_path}  ({how}{rejected})")
         status = "ATS check passed" if not report.ats_problems else f"ATS problems: {report.ats_problems}"
         typer.echo(f"  {status}")
+
+
+@app.command("auto-approve")
+def auto_approve_cmd(
+    min_score: Annotated[float, typer.Option("--min-score")],
+    limit: Annotated[int, typer.Option("--limit")] = 10,
+    exclude_company: Annotated[list[str] | None, typer.Option("--exclude-company")] = None,
+    exclude_title: Annotated[list[str] | None, typer.Option("--exclude-title")] = None,
+) -> None:
+    """Approve the best scored jobs at or above a threshold (policy approval)."""
+    approved = auto_approve(min_score, limit=limit, exclude_companies=exclude_company or [],
+                            exclude_title_keywords=exclude_title or [])
+    for job in approved:
+        typer.echo(f"approved {job.score:.2f}  {job.title} @ {job.company}")
+    typer.echo(f"auto-approved: {len(approved)}")
 
 
 @calibrate_app.command("label")
