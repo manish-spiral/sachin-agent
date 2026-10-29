@@ -8,6 +8,7 @@ is "unknown" and goes to a human — the applier never makes up an answer.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -17,6 +18,8 @@ from rapidfuzz import fuzz
 from shared.schemas.profile_fact import FactKind, ProfileFact
 
 ANSWER_MATCH_THRESHOLD = 85
+# A remembered acknowledgement is replayed only for (nearly) the same wording.
+CONSENT_MATCH_THRESHOLD = 92
 OPTION_MATCH_THRESHOLD = 70
 
 # Demographic / EEO questions are voluntary; the agent never volunteers them.
@@ -33,6 +36,8 @@ class AnswerSource(StrEnum):
     WORK_AUTHORIZATION = "work_authorization"
     ANSWERS_BANK = "answers_bank"
     DECLINE = "decline"
+    CONSENT_MEMORY = "consent_memory"  # the human's earlier decision on this domain
+    INFERRED = "inferred"  # LLM-derived from cited facts (applier/answering.py)
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,9 @@ class ApplicantContext:
     facts: list[ProfileFact]
     resume_path: Path | None = None
     cover_letter_path: Path | None = None
+    # (prompt, choice) acknowledgements the human made on this form's domain.
+    consents: list[tuple[str, str]] = field(default_factory=list)
+    inferrer: Callable[[str, list[str] | None], Answer | None] | None = None
     _by_path: dict[str, ProfileFact] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -81,6 +89,9 @@ class ApplicantContext:
             decline = next((o for o in options or [] if _DECLINE_OPTION.search(o)), None)
             return Answer(decline, AnswerSource.DECLINE) if decline else Unanswerable.SKIP
         if _CONSENT.search(q):
+            for prompt, choice in self.consents:
+                if fuzz.token_sort_ratio(q, prompt.lower()) >= CONSENT_MATCH_THRESHOLD:
+                    return self._choose(Answer(choice, AnswerSource.CONSENT_MEMORY), options)
             return Unanswerable.CONSENT
 
         for name, pattern in (("linkedin", r"linkedin"), ("github", r"github"),
@@ -104,6 +115,10 @@ class ApplicantContext:
                 best = (score, fact)
         if best is not None:
             return self._choose(Answer(str(best[1].data["answer"]), AnswerSource.ANSWERS_BANK, best[1].id), options)
+        if self.inferrer is not None:
+            inferred = self.inferrer(question, options)
+            if inferred is not None:
+                return inferred
         return Unanswerable.UNKNOWN
 
     @staticmethod

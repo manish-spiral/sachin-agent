@@ -17,6 +17,7 @@ class FieldResult:
     status: str  # filled | skipped | unknown | missing | consent
     value: str = ""
     detail: str = ""
+    options: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -15,87 +15,18 @@ from applier.adapters.spec import LocatorSpec, Strategy
 from applier.cli import app as cli
 from applier.context import Answer, AnswerSource, ApplicantContext, Unanswerable
 from applier.runner import ApplyError, application_url, make_application_id, run_application
-from applier.session import BrowserSession
 from shared.db.engine import get_session
-from shared.db.upsert import upsert_job
 from shared.paths import application_dir
 from shared.profile.facts import active_facts
 from shared.profile.store import save_profile
 from shared.schemas.application import Application, ApplicationStatus, PauseReason
 from shared.schemas.application_transitions import IllegalApplicationTransition, transition
-from shared.schemas.document import DocumentKind, TailoredDocument, make_document_id
+from shared.schemas.document import TailoredDocument
 from shared.schemas.failure import FailureClass, FailureEvent
-from shared.schemas.job import Job, JobStatus, make_job_id
-from shared.schemas.profile import Profile
+from shared.schemas.job import Job, JobStatus
+from tests.applier_helpers import JOB_ID, Browser, Scripted, make_profile
 
-FIXTURE = Path(__file__).parent / "fixtures" / "greenhouse_form.html"
 FORM_URL = "https://job-boards.greenhouse.io/acme/jobs/1"
-
-
-def _profile(**answers: str) -> Profile:
-    return Profile.model_validate({
-        "identity": {"first_name": "Arjun", "last_name": "Mehta", "email": "arjun@example.com",
-                     "phone": "+91 90000 12345", "linkedin": "linkedin.com/in/arjun"},
-        "work_authorization": {"requires_sponsorship": True, "authorized_countries": ["India"]},
-        "experience": [{"company": "Razorpay", "title": "Backend Engineer", "bullets": ["Built X"]}],
-        "answers": [{"question": "What is your notice period?", "answer": "60 days"},
-                    *({"question": q, "answer": a} for q, a in answers.items())],
-        "finalized": True,
-    })
-
-
-@pytest.fixture
-def applicant(fresh_db, tmp_path) -> Path:
-    save_profile(_profile(**{"Where did you first hear about this role?": "LinkedIn"}))
-    job = Job(id=make_job_id("greenhouse:acme", "1"), source="greenhouse:acme", external_id="1",
-              title="Backend Engineer", company="Acme", url="https://acme.com/careers/1",
-              status=JobStatus.APPROVED)
-    with get_session() as s:
-        upsert_job(s, job)
-        for kind in DocumentKind:
-            pdf = tmp_path / f"{kind.value}.pdf"
-            pdf.write_bytes(b"%PDF-1.4 test\n")
-            s.add(TailoredDocument(id=make_document_id(job.id, kind), job_id=job.id, kind=kind,
-                                   pdf_path=str(pdf), html_path=str(pdf), verified=True))
-        s.commit()
-    return tmp_path
-
-
-JOB_ID = make_job_id("greenhouse:acme", "1")
-
-
-class Browser:
-    """Session factory serving the fixture for the Greenhouse URL, offline."""
-
-    def __init__(self, tmp: Path, html: str | None = None) -> None:
-        self.tmp = tmp
-        self.html = html or FIXTURE.read_text()
-        self.sessions: list[BrowserSession] = []
-
-    def __call__(self) -> BrowserSession:
-        browser = self
-
-        class Offline(BrowserSession):
-            def start(self) -> BrowserSession:
-                super().start()
-                assert self.context is not None
-                self.context.route("**/*", lambda route: route.fulfill(
-                    status=200, content_type="text/html", body=browser.html))
-                return self
-
-            def pause_for_human(self, reason: str, *, interactive: bool) -> bool:
-                if not interactive:
-                    return False
-                # The "human" settles the acknowledgement in the browser.
-                self.page.locator("#question_5").fill("I acknowledge")
-                return True
-
-        session = Offline(self.tmp / "profile", headless=True)
-        self.sessions.append(session)
-        return session
-
-    def value(self, selector: str) -> str:
-        return self.sessions[-1].page.locator(selector).input_value()
 
 
 def _app() -> Application:
@@ -109,7 +40,7 @@ def _app() -> Application:
 
 
 def test_answers_come_only_from_facts(fresh_db):
-    save_profile(_profile())
+    save_profile(make_profile())
     ctx = ApplicantContext(facts=active_facts(include_pii=True))
 
     sponsor = ctx.answer("Will you require visa sponsorship now or in the future?", ["Yes", "No"])
@@ -151,12 +82,15 @@ def test_application_transitions():
 
 def test_fills_from_facts_and_pauses_on_consent(applicant):
     browser = Browser(applicant)
-    result = run_application(JOB_ID, approve=lambda a, r: pytest.fail("must not ask"), session_factory=browser)
+    human = Scripted()
+    result = run_application(JOB_ID, human=human, session_factory=browser)
+    assert ("approve", make_application_id(JOB_ID)) not in human.asked
 
     assert (result.status, result.pause_reason) == (ApplicationStatus.PAUSED, PauseReason.CONSENT)
     assert Path(result.browser_state_path or "").exists()
     steps = [json.loads(line) for line in (application_dir(result.id) / "steps.jsonl").read_text().splitlines()]
     assert [s["step"] for s in steps] == ["open", "filled", "paused_consent"]
+    assert ("choose", "By submitting my application, I acknowledge the Acme privacy notice") in human.asked
     fields = {f["label"]: f for f in steps[1]["fields"]}
     assert fields["Will you require Visa Sponsorship now, or in the future?"]["value"] == "Yes"
     assert fields["What is your notice period?"]["value"] == "60 days"
@@ -176,20 +110,24 @@ def test_human_resolves_then_pause_before_submit_then_resume_submits(applicant):
         seen["resume"] = browser.sessions[-1].page.locator("#resume").evaluate("el => el.files[0].name")
         return False
 
-    paused = run_application(JOB_ID, approve=capture_and_decline, session_factory=browser, interactive=True)
+    human = Scripted(choose=lambda d, p, o: "I acknowledge", approve=capture_and_decline)
+    paused = run_application(JOB_ID, human=human, session_factory=browser)
     assert (paused.status, paused.pause_reason) == (ApplicationStatus.PAUSED, PauseReason.SUBMIT_APPROVAL)
     assert seen == {"#first_name": "Arjun", "#email": "arjun@example.com", "#question_1": "Yes",
                     "#question_2": "linkedin.com/in/arjun", "#question_5": "I acknowledge",
                     "resume": "resume.pdf"}
 
-    submitted = run_application(JOB_ID, approve=lambda a, r: True, session_factory=browser, interactive=True)
+    # Resume: the acknowledgement is remembered for this domain; only approval is asked.
+    again = Scripted(approve=True)
+    submitted = run_application(JOB_ID, human=again, session_factory=browser)
+    assert [kind for kind, _ in again.asked] == ["approve"]
     assert submitted.status == ApplicationStatus.SUBMITTED and submitted.submitted_at is not None
     assert browser.sessions[-1].context is None  # closed cleanly
     with get_session() as s:
         assert s.get(Job, JOB_ID).status == JobStatus.APPLIED  # type: ignore[union-attr]
 
     with pytest.raises(ApplyError, match="already submitted"):
-        run_application(JOB_ID, approve=lambda a, r: True, session_factory=browser)
+        run_application(JOB_ID, human=Scripted(approve=True), session_factory=browser)
 
 
 def test_refuses_unapproved_job_and_missing_resume(applicant):
@@ -202,13 +140,13 @@ def test_refuses_unapproved_job_and_missing_resume(applicant):
             s.delete(doc)
         s.commit()
     with pytest.raises(ApplyError, match="no tailored resume"):
-        run_application(JOB_ID, approve=lambda a, r: True, session_factory=Browser(applicant))
+        run_application(JOB_ID, human=Scripted(approve=True), session_factory=Browser(applicant))
 
 
 def test_selector_drift_fails_and_is_captured(applicant):
     spec = builtin_spec("greenhouse")
     spec.form_marker = LocatorSpec(strategy=Strategy.CSS, value="input#firstName")  # site renamed it
-    result = run_application(JOB_ID, approve=lambda a, r: True, session_factory=Browser(applicant),
+    result = run_application(JOB_ID, human=Scripted(approve=True), session_factory=Browser(applicant),
                              adapter=FormAdapter(spec))
 
     assert result.status == ApplicationStatus.FAILED
@@ -226,13 +164,13 @@ def test_unknown_site_fails_as_unseen(applicant):
         job.source, job.url = "workable:acme", "https://apply.workable.com/acme/j/1"
         s.add(job)
         s.commit()
-    result = run_application(JOB_ID, approve=lambda a, r: True, session_factory=Browser(applicant))
+    result = run_application(JOB_ID, human=Scripted(approve=True), session_factory=Browser(applicant))
     assert result.status == ApplicationStatus.FAILED
     with get_session() as s:
         assert s.exec(select(FailureEvent)).one().failure_class == FailureClass.UNSEEN_SITE
 
 
 def test_list_cli(applicant):
-    run_application(JOB_ID, approve=lambda a, r: False, session_factory=Browser(applicant))
+    run_application(JOB_ID, human=Scripted(), session_factory=Browser(applicant))
     out = CliRunner().invoke(cli, ["list"]).output
     assert "paused/consent" in out and "Backend Engineer @ Acme" in out

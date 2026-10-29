@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel
 
 from shared.config import get_settings
+from shared.schemas.failure import FailureClass
 
 if TYPE_CHECKING:
     import openai
@@ -27,6 +30,7 @@ class Task(StrEnum):
     RESUME = "resume"
     COVER_LETTER = "cover_letter"
     VERIFY = "verify"
+    FORM_ANSWER = "form_answer"
 
 
 _BASE_URLS = {Provider.OPENAI: None, Provider.GROQ: "https://api.groq.com/openai/v1"}
@@ -37,6 +41,7 @@ _DEFAULT_MODELS = {
     (Provider.OPENAI, Task.RESUME): "gpt-4o-2024-08-06",
     (Provider.OPENAI, Task.COVER_LETTER): "gpt-4o-2024-08-06",
     (Provider.OPENAI, Task.VERIFY): "gpt-4o-2024-08-06",
+    (Provider.OPENAI, Task.FORM_ANSWER): "gpt-4o-2024-08-06",
     (Provider.GROQ, Task.EXTRACTION): "openai/gpt-oss-120b",
     (Provider.GROQ, Task.SCORING): "openai/gpt-oss-120b",
     # Groq quotas are per model: a short extraction task on the small model
@@ -47,6 +52,7 @@ _DEFAULT_MODELS = {
     # A checker from a different model family makes different mistakes than
     # the writer it checks, and draws on a separate quota.
     (Provider.GROQ, Task.VERIFY): "qwen/qwen3.8-27b",
+    (Provider.GROQ, Task.FORM_ANSWER): "openai/gpt-oss-120b",
 }
 # gpt-oss models reason before answering. Extraction is a one-off where a
 # dropped section costs real data, so it reasons more; scoring runs per job and
@@ -57,6 +63,7 @@ _REASONING_EFFORT = {
     (Provider.GROQ, Task.KEYWORDS): "low",
     (Provider.GROQ, Task.RESUME): "medium",
     (Provider.GROQ, Task.COVER_LETTER): "medium",
+    (Provider.GROQ, Task.FORM_ANSWER): "low",
 }
 # Reasoning tokens count against the output budget. Groq's default left too
 # little room for reasoning plus a full resume JSON (seen live: truncated JSON
@@ -124,3 +131,73 @@ def make_client(config: LLMConfig) -> openai.OpenAI:
         base_url=_BASE_URLS[config.provider],
         max_retries=_MAX_RETRIES[config.provider],
     )
+
+
+# --- structured calls -----------------------------------------------------
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class LLMError(RuntimeError):
+    def __init__(self, message: str, *, failure_class: FailureClass) -> None:
+        super().__init__(message)
+        self.failure_class = failure_class
+
+
+def parse_structured(system: str, user: str, model_cls: type[T], *, config: LLMConfig) -> T:
+    import openai
+
+    client = make_client(config)
+    try:
+        response = client.responses.parse(
+            model=config.model,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            text_format=model_cls,
+            **config.request_options(),
+        )
+    except openai.RateLimitError as exc:
+        raise LLMError(str(exc), failure_class=FailureClass.RATE_LIMIT) from exc
+    except openai.BadRequestError as exc:
+        # json_validate_failed: the model produced a bad draft (truncated or
+        # off-schema). Retryable, unlike a quota or auth error.
+        if exc.code == "json_validate_failed":
+            raise LLMError(str(exc), failure_class=FailureClass.SEMANTIC_MISMATCH) from exc
+        raise LLMError(str(exc), failure_class=FailureClass.TRANSIENT) from exc
+    except openai.AuthenticationError as exc:
+        raise LLMError(str(exc), failure_class=FailureClass.AUTH_WALL) from exc
+    except openai.APIError as exc:
+        raise LLMError(str(exc), failure_class=FailureClass.TRANSIENT) from exc
+
+    parsed = response.output_parsed
+    if parsed is None:
+        raise LLMError(
+            f"no structured output (refusal: {getattr(response, 'refusal', None)})",
+            failure_class=FailureClass.SEMANTIC_MISMATCH,
+        )
+    return parsed
+
+
+class StructuredLLM:
+    """`llm(task, system, user, Model)` → Model, with one resolved config per task.
+
+    Callers make several kinds of call; tests replace this whole object with a
+    fake, so nothing here needs mocking.
+    """
+
+    def __init__(self) -> None:
+        self._configs: dict[Task, LLMConfig] = {}
+
+    def config(self, task: Task) -> LLMConfig:
+        if task not in self._configs:
+            self._configs[task] = resolve(task)
+        return self._configs[task]
+
+    def model_name(self, task: Task) -> str:
+        config = self.config(task)
+        return f"{config.provider.value}:{config.model}"
+
+    def __call__(self, task: Task, system: str, user: str, model_cls: type[T]) -> T:
+        return parse_structured(system, user, model_cls, config=self.config(task))

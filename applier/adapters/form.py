@@ -149,10 +149,10 @@ class FormAdapter(Adapter):
                                detail=f"{result.source.value}:{result.fact_id or '-'}")
         if result == Unanswerable.CONSENT:
             return FieldResult("question", label, "consent" if required else "skipped",
-                               detail="legal acknowledgement: human decision")
+                               detail="legal acknowledgement: human decision", options=options)
         if result == Unanswerable.SKIP or not required:
             return FieldResult("question", label, "skipped", detail=result.value)
-        return FieldResult("question", label, "unknown", detail=f"options: {options}" if options else "")
+        return FieldResult("question", label, "unknown", options=options)
 
     def fill(self, session: BrowserSession, applicant: ApplicantContext) -> FillReport:
         page = session.page

@@ -19,7 +19,11 @@ from sqlmodel import select
 from applier.adapters import adapter_for_url
 from applier.adapters.base import FillReport
 from applier.adapters.form import FormAdapter, SelectorNotFound
-from applier.context import ApplicantContext
+from applier.context import Answer, ApplicantContext
+from applier.detectors import Blocker, click_consent, detect_blocker
+from applier.human import Absent, Human
+from applier.memory import consents_for, remember_answer, remember_consent
+from applier.notify import notify
 from applier.session import BrowserSession
 from shared.config import get_settings
 from shared.db.engine import get_session
@@ -28,14 +32,18 @@ from shared.paths import application_dir
 from shared.profile.facts import active_facts
 from shared.schemas.application import Application, ApplicationStatus, PauseReason
 from shared.schemas.application_transitions import transition as app_transition
+from shared.schemas.consent import ConsentKind
 from shared.schemas.document import DocumentKind, TailoredDocument
 from shared.schemas.failure import FailureClass
 from shared.schemas.job import Job, JobStatus
 from shared.schemas.job_transitions import transition as job_transition
+from shared.schemas.profile_fact import ProfileFact
 
 SessionFactory = Callable[[], BrowserSession]
-# Decides, for one filled form, whether to submit. The CLI asks the human.
-Approver = Callable[[Application, FillReport], bool]
+InferrerFactory = Callable[[list[ProfileFact]], Callable[[str, list[str] | None], Answer | None]]
+# A page can stack walls (consent banner, then login): bounded so a page that
+# re-shows a banner forever cannot loop.
+MAX_BLOCKER_ROUNDS = 4
 
 
 class ApplyError(RuntimeError):
@@ -109,7 +117,7 @@ def load_application(application_id: str) -> Application:
     return app
 
 
-def _prepare(job_id: str) -> tuple[Job, Application, ApplicantContext]:
+def _prepare(job_id: str) -> tuple[Job, Application]:
     with get_session() as s:
         job = s.get(Job, job_id)
     if job is None:
@@ -132,21 +140,25 @@ def _prepare(job_id: str) -> tuple[Job, Application, ApplicantContext]:
     app.cover_letter_path = letter.pdf_path if letter else None
     app = _save(app)
 
-    applicant = ApplicantContext(
-        facts=active_facts(include_pii=True),
-        resume_path=Path(resume.pdf_path),
-        cover_letter_path=Path(letter.pdf_path) if letter else None,
-    )
-    return job, app, applicant
+    return job, app
 
 
-def _pause(app: Application, reason: PauseReason, session: BrowserSession, log: StepLog) -> Application:
+def _pause(app: Application, job: Job, reason: PauseReason, session: BrowserSession,
+           log: StepLog, detail: str = "") -> Application:
+    """Persist everything needed to resume — browser state, screenshot, DOM —
+    then tell the human."""
     state = session.save_state(log.directory / "storage_state.json")
     session.dom(log.directory / "page.html")
     app.browser_state_path = str(state)
     app_transition(app, ApplicationStatus.PAUSED)
     app.pause_reason = reason
-    log.record(f"paused_{reason.value}", session)
+    log.record(f"paused_{reason.value}", session, detail=detail)
+    shots = sorted(log.directory.glob("*.png"))
+    notify(
+        f"⏸ {job.title} @ {job.company}: paused ({reason.value}). {detail[:300]}\n"
+        f"Resume: sachin-agent-applier resume {app.id[:12]}",
+        photo=shots[-1] if shots else None,
+    )
     return _save(app)
 
 
@@ -167,17 +179,77 @@ def _fail(app: Application, job: Job, log: StepLog, session: BrowserSession | No
     return _save(app)
 
 
+def _applicant(job_id: str, domain: str, inferrer: InferrerFactory | None) -> ApplicantContext:
+    resume = _document(job_id, DocumentKind.RESUME)
+    letter = _document(job_id, DocumentKind.COVER_LETTER)
+    facts = active_facts(include_pii=True)
+    return ApplicantContext(
+        facts=facts,
+        resume_path=Path(resume.pdf_path) if resume else None,
+        cover_letter_path=Path(letter.pdf_path) if letter else None,
+        consents=[(c.prompt, c.choice) for c in consents_for(domain, ConsentKind.ACKNOWLEDGEMENT)],
+        inferrer=inferrer(facts) if inferrer else None,
+    )
+
+
+def _clear_blockers(session: BrowserSession, domain: str, human: Human, log: StepLog) -> Blocker | None:
+    """Replay remembered banner decisions; hand CAPTCHAs, logins and new
+    consents to the human. Returns the blocker still standing, if any."""
+    for _ in range(MAX_BLOCKER_ROUNDS):
+        blocker = detect_blocker(session.page)
+        if blocker is None:
+            return None
+        if blocker.reason == PauseReason.CONSENT:
+            remembered = next((c.choice for c in consents_for(domain, ConsentKind.BANNER)
+                               if c.choice in blocker.options), None)
+            choice = remembered or human.choose(domain, blocker.detail, list(blocker.options))
+            if choice is None:
+                return blocker
+            if remembered is None:
+                remember_consent(domain, ConsentKind.BANNER, blocker.detail, choice)
+            click_consent(session.page, choice)
+            log.record("consent_banner", session, choice=choice, remembered=remembered is not None)
+            continue
+        if not human.resolve(session, blocker.reason, blocker.detail):
+            return blocker
+        log.record(f"human_resolved_{blocker.reason.value}", session)
+    return detect_blocker(session.page)
+
+
+def _ask_human(report: FillReport, domain: str, human: Human, log: StepLog) -> bool:
+    """Ask for every unknown / consent field. True if all got an answer.
+    Answers are taught to the answers bank, consents to consent memory."""
+    complete = True
+    for f in report.needs_human:
+        if f.status == "consent":
+            choice = human.choose(domain, f.label, f.options)
+            if choice is None:
+                complete = False
+                continue
+            remember_consent(domain, ConsentKind.ACKNOWLEDGEMENT, f.label, choice)
+        else:
+            value = human.answer(f.label, f.options)
+            if value is None:
+                complete = False
+                continue
+            remember_answer(f.label, value)
+        log.record("human_answered", None, question=f.label)
+    return complete
+
+
 def run_application(
     job_id: str,
     *,
-    approve: Approver,
+    human: Human | None = None,
     session_factory: SessionFactory = default_session,
-    interactive: bool = False,
     adapter: FormAdapter | None = None,
+    inferrer: InferrerFactory | None = None,
 ) -> Application:
-    job, app, applicant = _prepare(job_id)
+    human = human or Absent()
+    job, app = _prepare(job_id)
     log = StepLog(app, application_dir(app.id))
     url = application_url(job)
+    domain = domain_from_url(url) or ""
     adapter = adapter or adapter_for_url(url)
     if adapter is None:
         return _fail(app, job, log, None, ApplyError(f"no adapter for {url}"),
@@ -190,30 +262,43 @@ def run_application(
         try:
             adapter.init(session, url)
             log.record("open", session, url=session.page.url)
+            blocker = _clear_blockers(session, domain, human, log)
+            if blocker is not None:
+                return _pause(app, job, blocker.reason, session, log, blocker.detail)
             if not adapter.detect(session):
                 raise SelectorNotFound("form", adapter.spec.form_marker)
-            report = adapter.fill(session, applicant)
+            report = adapter.fill(session, _applicant(job.id, domain, inferrer))
+            log.record("filled", session, fields=[f.__dict__ for f in report.fields])
+            if report.needs_human:
+                if not _ask_human(report, domain, human, log):
+                    first = report.needs_human[0]
+                    reason = PauseReason.CONSENT if first.status == "consent" else PauseReason.UNKNOWN_FIELD
+                    return _pause(app, job, reason, session, log,
+                                  "; ".join(f.label for f in report.needs_human))
+                # Re-fill: the newly taught answers and consents now resolve.
+                report = adapter.fill(session, _applicant(job.id, domain, inferrer))
+                log.record("refilled", session, fields=[f.__dict__ for f in report.fields])
+                if report.needs_human:
+                    return _pause(app, job, PauseReason.UNKNOWN_FIELD, session, log,
+                                  "; ".join(f.label for f in report.needs_human))
         except SelectorNotFound as exc:
             session.dom(log.directory / "page.html")
             return _fail(app, job, log, session, exc, FailureClass.SELECTOR_DRIFT, "fill")
         except Exception as exc:
             return _fail(app, job, log, session, exc, FailureClass.UNKNOWN, "fill")
 
-        log.record("filled", session, fields=[f.__dict__ for f in report.fields])
-        if report.needs_human:
-            first = report.needs_human[0]
-            reason = PauseReason.CONSENT if first.status == "consent" else PauseReason.UNKNOWN_FIELD
-            labels = [f.label for f in report.needs_human]
-            if not session.pause_for_human(f"Needs you: {labels}", interactive=interactive):
-                return _pause(app, reason, session, log)
-            log.record("human_completed_fields", session, fields=labels)
-
-        if not approve(app, report):
-            return _pause(app, PauseReason.SUBMIT_APPROVAL, session, log)
+        if not human.approve(app, report):
+            return _pause(app, job, PauseReason.SUBMIT_APPROVAL, session, log, "ready to submit")
 
         log.record("approved", session)
         try:
             confirmed = adapter.submit(session)
+            if not confirmed:
+                # A challenge often appears only on submit.
+                blocker = _clear_blockers(session, domain, human, log)
+                if blocker is not None:
+                    return _pause(app, job, blocker.reason, session, log, blocker.detail)
+                confirmed = adapter.submit(session)
         except Exception as exc:
             return _fail(app, job, log, session, exc, FailureClass.UNKNOWN, "submit")
         if not confirmed:
