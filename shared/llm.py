@@ -31,6 +31,7 @@ class Task(StrEnum):
     COVER_LETTER = "cover_letter"
     VERIFY = "verify"
     FORM_ANSWER = "form_answer"
+    DIAGNOSE = "diagnose"
 
 
 _BASE_URLS = {Provider.OPENAI: None, Provider.GROQ: "https://api.groq.com/openai/v1"}
@@ -42,6 +43,7 @@ _DEFAULT_MODELS = {
     (Provider.OPENAI, Task.COVER_LETTER): "gpt-4o-2024-08-06",
     (Provider.OPENAI, Task.VERIFY): "gpt-4o-2024-08-06",
     (Provider.OPENAI, Task.FORM_ANSWER): "gpt-4o-2024-08-06",
+    (Provider.OPENAI, Task.DIAGNOSE): "gpt-4o-mini",
     (Provider.GROQ, Task.EXTRACTION): "openai/gpt-oss-120b",
     (Provider.GROQ, Task.SCORING): "openai/gpt-oss-120b",
     # Groq quotas are per model: a short extraction task on the small model
@@ -53,6 +55,7 @@ _DEFAULT_MODELS = {
     # the writer it checks, and draws on a separate quota.
     (Provider.GROQ, Task.VERIFY): "qwen/qwen3.8-27b",
     (Provider.GROQ, Task.FORM_ANSWER): "openai/gpt-oss-120b",
+    (Provider.GROQ, Task.DIAGNOSE): "openai/gpt-oss-20b",
 }
 # gpt-oss models reason before answering. Extraction is a one-off where a
 # dropped section costs real data, so it reasons more; scoring runs per job and
@@ -64,6 +67,7 @@ _REASONING_EFFORT = {
     (Provider.GROQ, Task.RESUME): "medium",
     (Provider.GROQ, Task.COVER_LETTER): "medium",
     (Provider.GROQ, Task.FORM_ANSWER): "low",
+    (Provider.GROQ, Task.DIAGNOSE): "low",
 }
 # Reasoning tokens count against the output budget. Groq's default left too
 # little room for reasoning plus a full resume JSON (seen live: truncated JSON

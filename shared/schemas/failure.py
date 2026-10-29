@@ -48,4 +48,8 @@ class FailureEvent(SQLModel, table=True):
     context: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     failure_class: FailureClass | None = None
     diagnosed_at: datetime | None = None
+    # Phase 11 (additive): {"method": rule|llm, "confidence", "evidence",
+    # "emitted_class", "prompt_version", "model"}. failure_class is then the
+    # diagnosed class; the emitter's provisional guess stays here.
+    diagnosis: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)

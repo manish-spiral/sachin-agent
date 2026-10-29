@@ -52,6 +52,20 @@ class ApplyError(RuntimeError):
     pass
 
 
+class Escalation(RuntimeError):
+    """The run needed a human: recorded as a failure event, not raised."""
+
+
+# Pauses that mean "could not do it alone". SUBMIT_APPROVAL is by design and
+# KILL_SWITCH is the human's own action; neither is an escalation.
+_ESCALATIONS = {
+    PauseReason.CAPTCHA: FailureClass.CAPTCHA,
+    PauseReason.LOGIN: FailureClass.AUTH_WALL,
+    PauseReason.CONSENT: FailureClass.CONSENT,
+    PauseReason.UNKNOWN_FIELD: FailureClass.UNKNOWN_FIELD,
+}
+
+
 def make_application_id(job_id: str) -> str:
     """One application per job: re-running resumes it instead of applying twice."""
     return hashlib.sha256(f"application|{job_id}".encode()).hexdigest()
@@ -164,6 +178,19 @@ def _pause(app: Application, job: Job, reason: PauseReason, session: BrowserSess
     app_transition(app, ApplicationStatus.PAUSED)
     app.pause_reason = reason
     log.record(f"paused_{reason.value}", session, detail=detail)
+    if reason in _ESCALATIONS:
+        # The agent could not continue on its own: count it (Phase 16's
+        # escalation rate) and keep the evidence (Phase 11 diagnosis).
+        emit_failure(
+            source_module="applier",
+            phase=f"pause_{reason.value}",
+            error=Escalation(detail or reason.value),
+            failure_class=_ESCALATIONS[reason],
+            domain=domain_from_url(application_url(job)),
+            job_id=job.id,
+            application_id=app.id,
+            snapshot_id=log.snapshot_id,
+        )
     shot = log.recorder.last.screenshot_path if log.recorder and log.recorder.last else None
     shots = sorted(log.directory.glob("*.png"))
     photo = Path(shot) if shot else (shots[-1] if shots else None)

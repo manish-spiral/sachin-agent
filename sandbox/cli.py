@@ -76,6 +76,28 @@ def replay(
 
 
 @app.command()
+def diagnose(
+    llm: Annotated[bool, typer.Option("--llm/--rules-only", help="Use the LLM for what rules can't place.")] = True,
+    redo: Annotated[bool, typer.Option("--redo", help="Re-diagnose already diagnosed failures too.")] = False,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+) -> None:
+    """Classify failures into the taxonomy (rules first, then the LLM)."""
+    from sandbox.diagnose import diagnose_pending
+    from shared.llm import LLMNotConfigured, StructuredLLM, Task, resolve
+
+    model = None
+    if llm:
+        try:
+            resolve(Task.DIAGNOSE)
+            model = StructuredLLM()
+        except LLMNotConfigured:
+            typer.echo("No LLM configured: rules only.")
+    report = diagnose_pending(llm=model, limit=limit, redo=redo)
+    typer.echo(f"diagnosed by: {dict(report.by_method) or 'nothing'}; classes: {dict(report.by_class)}")
+    typer.echo(f"reclassified from the emitter's guess: {report.reclassified}; still undiagnosed: {report.left}")
+
+
+@app.command()
 def prune(days: Annotated[int | None, typer.Option("--days")] = None) -> None:
     """Delete snapshot runs older than the retention window."""
     keep = days if days is not None else get_settings().snapshot_retention_days
