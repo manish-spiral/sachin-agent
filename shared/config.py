@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 
+    # Matcher (Phase 5)
+    scoring_model: str = "gpt-4o-mini"
+
 
 _settings: Settings | None = None
 

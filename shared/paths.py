@@ -29,3 +29,10 @@ def profile_md_path() -> Path:
 
 def snapshot_run_dir(run_id: str) -> Path:
     return Path(get_settings().snapshot_dir) / run_id
+
+def scoring_weights_path() -> Path:
+    return Path(get_settings().data_dir) / "scoring_weights.json"
+
+
+def calibration_path() -> Path:
+    return Path(get_settings().data_dir) / "calibration.json"

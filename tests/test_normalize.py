@@ -24,6 +24,7 @@ from shared.schemas.job import Job
         ("Backend Engineer (Remote)", "backend engineer"),
         ("Director, Software Engrg Mgmt", "director software engineering management"),
         ("DevOps Engineer", "devops engineer"),
+        ("Senior ML Engineer_Linguistics", "senior machine learning engineer linguistics"),
     ],
 )
 def test_normalize_title(raw: str, expected: str):

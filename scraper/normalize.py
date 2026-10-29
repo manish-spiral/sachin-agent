@@ -36,7 +36,7 @@ _TITLE_TOKENS = {
 _TITLE_DROP = {"remote", "hybrid", "onsite", "on-site"}
 # German boards append gender markers: (m/w/d), (f/m/d), (w/m/div.), (all genders).
 _GENDER_RE = re.compile(r"\((?:[mwfdx]\s*/\s*)+(?:[mwfdx]|div)\.?\)|\(all genders\)", re.I)
-_TITLE_SPLIT_RE = re.compile(r"[\s,/|()\[\]:;–—\-]+")
+_TITLE_SPLIT_RE = re.compile(r"[\s,/|()\[\]:;–—_\-]+")
 
 _COMPANY_SUFFIXES = {
     "inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co",
