@@ -172,13 +172,19 @@ def inspect(job_id: Annotated[str, typer.Argument(help="Job id or unique prefix.
     if adapter is None:
         typer.echo(f"✗ no adapter for {url} (Phase 15 synthesizes one)", err=True)
         raise typer.Exit(1)
+    from applier.snapshot import SnapshotRecorder, new_run_id
+    from shared.db.failures import domain_from_url
+
     applicant = ApplicantContext(facts=active_facts(include_pii=True))
-    with _session(False)() as session:
+    recorder = SnapshotRecorder(new_run_id("inspect"), domain_from_url(url) or "")
+    with recorder.attach(_session(False)()) as session:
         adapter.init(session, url)
+        snapshot = recorder.capture(session, "inspect")
         if not adapter.detect(session):
-            typer.echo(f"✗ {url}: no {adapter.domain} form detected", err=True)
+            typer.echo(f"✗ {url}: no {adapter.domain} form detected (snapshot {snapshot.id})", err=True)
             raise typer.Exit(1)
         info = adapter.extract(session)
+    typer.echo(f"snapshot: {snapshot.id}  {snapshot.page_signature}")
     typer.echo(f"{info.title}\n{info.url}\nstandard fields: {[f.intent for f in adapter.spec.fields]}")
     for question in info.questions:
         result = applicant.answer(question)

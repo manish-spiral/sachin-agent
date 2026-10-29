@@ -52,3 +52,15 @@ def test_shared_never_imports_modules():
         violations += [f"{py_file.relative_to(ROOT)} imports {imp}" for imp in _iter_imports(tree)
                        if imp.split(".")[0] in MODULES | {"orchestrator"}]
     assert not violations, violations
+
+
+def test_nothing_imports_the_sandbox():
+    """The sandbox is the applier's offline test harness: it may import applier
+    adapters to replay them, but no runtime module may depend on it."""
+    violations = []
+    for module in [*MODULES, "shared", "orchestrator"]:
+        for py_file in (ROOT / module).rglob("*.py"):
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+            violations += [f"{py_file.relative_to(ROOT)} imports {imp}"
+                           for imp in _iter_imports(tree) if imp.split(".")[0] == "sandbox"]
+    assert not violations, violations

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -12,13 +13,37 @@ from loguru import logger
 from scraper.config import load_companies
 from scraper.normalize import apply_normalization
 from scraper.sources import SOURCE_REGISTRY, BaseSource
+from shared.config import get_settings
 from shared.db.dedup import DedupReport, dedup_jobs
 from shared.db.engine import get_session
 from shared.db.failures import emit_failure
 from shared.db.source_health import record_source_failure, record_source_success
 from shared.db.upsert import upsert_job
+from shared.paths import snapshot_run_dir
 from shared.schemas.failure import FailureClass
+from shared.schemas.snapshot import SnapshotIndex
 from shared.schemas.source_health import SourceHealth
+from shared.signature import json_features, page_signature
+
+
+def snapshot_api_response(run_id: str, source: BaseSource, board: str, raws: list) -> SnapshotIndex:
+    """Save the raw payloads of one board fetch as an API snapshot. Its
+    signature fingerprints the JSON schema, so schema drift is visible."""
+    path = snapshot_run_dir(run_id) / "api" / f"{source.name}-{board}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"source": source.name, "board": board, "fetched_at": datetime.now(UTC).isoformat(),
+               "jobs": [raw.payload for raw in raws]}
+    path.write_text(json.dumps(payload, default=str), encoding="utf-8")
+    features = json_features({"jobs": payload["jobs"]})
+    row = SnapshotIndex(
+        id=f"{run_id}-{source.name}-{board}", run_id=run_id, domain=source.domain,
+        url=f"{source.name}:{board}", intent="api:fetch", html_path=str(path),
+        page_signature=page_signature(features), features=features,
+    )
+    with get_session() as session:
+        session.merge(row)
+        session.commit()
+    return row
 
 
 @dataclass
@@ -61,6 +86,7 @@ async def _run_board(
     client: httpx.AsyncClient,
     limit: int | None,
     report: RunReport,
+    run_id: str,
 ) -> None:
     key = f"{source.name}:{board}"
     logger.info(f"{key}: fetching")
@@ -83,6 +109,10 @@ async def _run_board(
         record_source_failure(key, str(exc))
         report.failed_boards.append(key)
         return
+
+    snapshot_id = None
+    if get_settings().capture_snapshots:
+        snapshot_id = snapshot_api_response(run_id, source, board, raws).id
 
     for raw, error in enrich_errors:
         logger.warning(f"{key}: enrich failed for external_id={raw.external_id}: {error}")
@@ -110,6 +140,7 @@ async def _run_board(
                     error=exc,
                     failure_class=FailureClass.SCHEMA_DRIFT,
                     domain=source.domain,
+                    snapshot_id=snapshot_id,
                     context={
                         "source": source.name,
                         "company": board,
@@ -132,6 +163,7 @@ async def run_all_sources(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> RunReport:
     report = RunReport()
+    run_id = f"scrape-{datetime.now(UTC):%Y%m%dT%H%M%S%f}"
     names = [n for n in source_names if n in SOURCE_REGISTRY]
     if not names:
         logger.warning("no valid sources selected")
@@ -158,7 +190,7 @@ async def run_all_sources(
                     )
                     report.skipped_boards.append(key)
                     continue
-                await _run_board(source, board, client=client, limit=limit, report=report)
+                await _run_board(source, board, client=client, limit=limit, report=report, run_id=run_id)
 
     report.dedup = run_dedup()
     logger.info(

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     score_llm_calls_per_run: int = 60
     tailor_per_run: int = 10
 
+    # Snapshots (Phase 10)
+    capture_snapshots: bool = True
+    snapshot_retention_days: int = 30
+
 
 _settings: Settings | None = None
 

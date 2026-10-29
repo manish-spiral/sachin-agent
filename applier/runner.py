@@ -24,6 +24,7 @@ from applier.detectors import Blocker, click_consent, detect_blocker
 from applier.human import Absent, Human
 from applier.memory import consents_for, remember_answer, remember_consent
 from applier.session import BrowserSession
+from applier.snapshot import SnapshotRecorder, new_run_id
 from shared.config import get_settings
 from shared.db.engine import get_session
 from shared.db.failures import domain_from_url, emit_failure
@@ -73,19 +74,28 @@ def default_session() -> BrowserSession:
 class StepLog:
     application: Application
     directory: Path
+    recorder: SnapshotRecorder | None = None
 
     def __post_init__(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         self._n = len(list(self.directory.glob("*.png")))
+
+    @property
+    def snapshot_id(self) -> str | None:
+        return self.recorder.last.id if self.recorder and self.recorder.last else None
 
     def record(self, step: str, session: BrowserSession | None, **detail: object) -> None:
         self._n += 1
         shot = None
         if session is not None:
             try:
-                shot = str(session.screenshot(self.directory / f"{self._n:02d}-{step}.png"))
+                if self.recorder is not None:
+                    snap = self.recorder.capture(session, step)
+                    shot, detail["snapshot_id"] = snap.screenshot_path, snap.id
+                else:
+                    shot = str(session.screenshot(self.directory / f"{self._n:02d}-{step}.png"))
             except Exception as exc:  # a dead page must not hide the step itself
-                detail["screenshot_error"] = str(exc)
+                detail["capture_error"] = str(exc)
         entry = {"ts": datetime.now(UTC).isoformat(), "step": step, "screenshot": shot, **detail}
         with (self.directory / "steps.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
@@ -154,11 +164,13 @@ def _pause(app: Application, job: Job, reason: PauseReason, session: BrowserSess
     app_transition(app, ApplicationStatus.PAUSED)
     app.pause_reason = reason
     log.record(f"paused_{reason.value}", session, detail=detail)
+    shot = log.recorder.last.screenshot_path if log.recorder and log.recorder.last else None
     shots = sorted(log.directory.glob("*.png"))
+    photo = Path(shot) if shot else (shots[-1] if shots else None)
     notify(
         f"⏸ {job.title} @ {job.company}: paused ({reason.value}). {detail[:300]}\n"
         f"Resume: sachin-agent-applier resume {app.id[:12]}",
-        photo=shots[-1] if shots else None,
+        photo=photo,
     )
     return _save(app)
 
@@ -174,6 +186,7 @@ def _fail(app: Application, job: Job, log: StepLog, session: BrowserSession | No
         domain=domain_from_url(application_url(job)),
         job_id=job.id,
         application_id=app.id,
+        snapshot_id=log.snapshot_id,
         context={"last_step": app.last_step},
     )
     app_transition(app, ApplicationStatus.FAILED)
@@ -272,7 +285,9 @@ def run_application(
     if is_killed():
         raise ApplyError("kill switch is on")
     job, app = _prepare(job_id)
-    log = StepLog(app, application_dir(app.id))
+    recorder = SnapshotRecorder(new_run_id(app.id[:12]), domain_from_url(application_url(job)) or "") \
+        if get_settings().capture_snapshots else None
+    log = StepLog(app, application_dir(app.id), recorder)
     url = application_url(job)
     domain = domain_from_url(url) or ""
     adapter = adapter or adapter_for_url(url)
@@ -281,7 +296,10 @@ def run_application(
                      FailureClass.UNSEEN_SITE, "select_adapter")
     app.adapter_version_id = f"{adapter.spec.domain}@v{adapter.spec.version}"
 
-    with session_factory() as session:
+    session = session_factory()
+    if recorder is not None:
+        recorder.attach(session)
+    with session:
         if app.browser_state_path:
             session.restore_state(Path(app.browser_state_path))
         try:

@@ -24,6 +24,10 @@ class BrowserSession:
     def __init__(self, profile_dir: Path, *, headless: bool = True) -> None:
         self.profile_dir = profile_dir
         self.headless = headless
+        # Set before start() to capture the run (Phase 10): the HAR feeds
+        # offline replay, the trace is for a human debugging a failure.
+        self.record_har: Path | None = None
+        self.record_trace: Path | None = None
         self._playwright: Playwright | None = None
         self.context: BrowserContext | None = None
         self._page: Page | None = None
@@ -39,9 +43,15 @@ class BrowserSession:
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = sync_playwright().start()
+        har: dict = {}
+        if self.record_har is not None:
+            self.record_har.parent.mkdir(parents=True, exist_ok=True)
+            har = {"record_har_path": str(self.record_har), "record_har_content": "embed"}
         self.context = self._playwright.chromium.launch_persistent_context(
-            str(self.profile_dir), headless=self.headless, accept_downloads=False
+            str(self.profile_dir), headless=self.headless, accept_downloads=False, **har
         )
+        if self.record_trace is not None:
+            self.context.tracing.start(screenshots=True, snapshots=True)
         self.context.set_default_timeout(ACTION_TIMEOUT_MS)
         self.context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
         self._page = self.context.pages[0] if self.context.pages else self.context.new_page()
@@ -49,7 +59,10 @@ class BrowserSession:
 
     def close(self) -> None:
         if self.context is not None:
-            self.context.close()
+            if self.record_trace is not None:
+                self.record_trace.parent.mkdir(parents=True, exist_ok=True)
+                self.context.tracing.stop(path=str(self.record_trace))
+            self.context.close()  # flushes the HAR
         if self._playwright is not None:
             self._playwright.stop()
         self.context = self._playwright = self._page = None

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import Index
+from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field, SQLModel
 
 
@@ -31,4 +32,8 @@ class SnapshotIndex(SQLModel, table=True):
     screenshot_path: str | None = None
     trace_path: str | None = None
     page_signature: str | None = None
+    # Phase 10 (additive): the feature vector behind page_signature
+    # (shared/signature.py), used for similarity retrieval in Phase 14.
+    features: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # For API snapshots html_path holds the raw JSON response instead.
     created_at: datetime = Field(default_factory=_now)

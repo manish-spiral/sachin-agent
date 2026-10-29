@@ -39,9 +39,10 @@ sachin-agent-applier = "applier.cli:app"
 sachin-agent-db      = "shared.db.cli:app"
 sachin-agent-profile = "shared.profile.cli:app"
 sachin-agent-run     = "orchestrator.cli:app"
+sachin-agent-sandbox = "sandbox.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["shared", "scraper", "matcher", "applier", "orchestrator"]
+packages = ["shared", "scraper", "matcher", "applier", "orchestrator", "sandbox"]
 
 [tool.ruff]
 line-length = 100
@@ -54,7 +55,7 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-files = ["shared", "scraper", "matcher", "applier", "orchestrator"]
+files = ["shared", "scraper", "matcher", "applier", "orchestrator", "sandbox"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
