@@ -34,16 +34,31 @@ def load_snapshot(snapshot_id: str) -> SnapshotIndex:
     return snap
 
 
-@contextmanager
-def offline_page(snapshot: SnapshotIndex, *, javascript: bool = False) -> Iterator[Page]:
-    from playwright.sync_api import sync_playwright
+class OfflineBrowser:
+    """One headless browser, many offline snapshot pages (fast suites)."""
 
-    dom = Path(snapshot.html_path).read_text(encoding="utf-8")
-    har = Path(snapshot.har_path) if snapshot.har_path else None
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
+    def __init__(self) -> None:
+        from playwright.sync_api import sync_playwright
+
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch()
+
+    def close(self) -> None:
+        self._browser.close()
+        self._pw.stop()
+
+    def __enter__(self) -> OfflineBrowser:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    @contextmanager
+    def page(self, snapshot: SnapshotIndex, *, javascript: bool = False) -> Iterator[Page]:
+        dom = Path(snapshot.html_path).read_text(encoding="utf-8")
+        har = Path(snapshot.har_path) if snapshot.har_path else None
+        context = self._browser.new_context(java_script_enabled=javascript, service_workers="block")
         try:
-            context = browser.new_context(java_script_enabled=javascript, service_workers="block")
             context.route("**/*", lambda route: route.abort())
             if har is not None and har.exists():
                 context.route_from_har(str(har), not_found="abort")
@@ -54,4 +69,10 @@ def offline_page(snapshot: SnapshotIndex, *, javascript: bool = False) -> Iterat
             page.goto(snapshot.url, wait_until="domcontentloaded")
             yield page
         finally:
-            browser.close()
+            context.close()
+
+
+@contextmanager
+def offline_page(snapshot: SnapshotIndex, *, javascript: bool = False) -> Iterator[Page]:
+    with OfflineBrowser() as browser, browser.page(snapshot, javascript=javascript) as page:
+        yield page

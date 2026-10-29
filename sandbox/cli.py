@@ -98,6 +98,32 @@ def diagnose(
 
 
 @app.command()
+def suite(
+    domain: Annotated[str, typer.Argument(help="e.g. greenhouse.io")],
+    spec: Annotated[Path | None, typer.Option("--spec", help="Adapter spec JSON to test (default: built-in).")] = None,
+    min_pass: Annotated[float, typer.Option("--min-pass", help="Exit 1 below this pass rate.")] = 1.0,
+) -> None:
+    """Replay an adapter against every stored form snapshot of a domain, offline."""
+    from applier.adapters import builtin_spec, spec_for_url
+    from applier.adapters.form import FormAdapter
+    from applier.adapters.spec import AdapterSpec
+    from sandbox.harness import run_suite
+
+    if spec is not None:
+        adapter_spec = AdapterSpec.load(spec)
+    else:
+        found = spec_for_url(f"https://{domain}/")
+        adapter_spec = found or builtin_spec(domain.split(".")[0])
+    result = run_suite(domain, FormAdapter(adapter_spec))
+    for r in result.results:
+        typer.echo(f"{'✓' if r.passed else '✗'} {r.snapshot_id}  {r.seconds:.1f}s  {'; '.join(r.failures)}")
+    typer.echo(f"{adapter_spec.domain} v{adapter_spec.version}: {result.passed}/{result.total} passed "
+               f"({result.pass_rate:.0%}) in {result.seconds:.1f}s")
+    if result.total == 0 or result.pass_rate < min_pass:
+        raise typer.Exit(1)
+
+
+@app.command()
 def prune(days: Annotated[int | None, typer.Option("--days")] = None) -> None:
     """Delete snapshot runs older than the retention window."""
     keep = days if days is not None else get_settings().snapshot_retention_days
