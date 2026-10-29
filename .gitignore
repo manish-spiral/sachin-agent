@@ -25,4 +25,4 @@ profile-data/*.md
 # Caches
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
+.mypy_cache/scraper/companies.json

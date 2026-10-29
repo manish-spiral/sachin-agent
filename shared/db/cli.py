@@ -1,4 +1,4 @@
-"""`jobagent-db` CLI."""
+"""`sachin-agent-db` CLI."""
 
 from __future__ import annotations
 

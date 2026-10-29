@@ -1,0 +1,5 @@
+{
+  "greenhouse": ["stripe", "vercel"],
+  "lever": ["spotify", "palantir"],
+  "ashby": ["openai", "ramp"]
+}

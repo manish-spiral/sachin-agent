@@ -1,4 +1,4 @@
-"""`jobagent-applier` CLI."""
+"""`sachin-agent-applier` CLI."""
 
 from __future__ import annotations
 

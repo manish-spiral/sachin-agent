@@ -7,44 +7,28 @@ from sqlmodel import Session
 
 from shared.schemas.job import Job
 
-# Fields we deliberately do NOT overwrite on re-scrape — they represent state
-# the user has asserted (via scoring / approval) or history we must preserve.
-_PRESERVED_FIELDS = {
-    "status",           # user decision (scored, approved, rejected, applied)
-    "score",            # matcher output
-    "score_breakdown",  # matcher reasoning
-    "first_seen_at",    # historical fact
-}
+# Whitelist of fields a re-scrape may overwrite. Everything else — status,
+# score, score_breakdown, first_seen_at — is user/matcher state or history.
+_UPDATE_FIELDS = (
+    "last_seen_at",
+    "title",
+    "description_raw",
+    "url",
+    "posted_at",
+    "salary_min",
+    "salary_max",
+    "salary_currency",
+    "remote",
+    "skills",
+)
 
 
 def upsert_job(session: Session, job: Job) -> Job:
-    """
-    Insert if new, update mutable fields if exists.
-
-    Updated on conflict: title, description_raw, url, posted_at,
-                        salary_min/max/currency, last_seen_at, remote, skills.
-
-    Preserved on conflict: status, score, score_breakdown, first_seen_at.
-    """
-    values = job.model_dump(mode="python")
-    for k in _PRESERVED_FIELDS:
-        values.pop(k, None)  # exclude from INSERT-set on conflict path
-
+    """Insert if new; on conflict update only `_UPDATE_FIELDS`."""
     stmt = sqlite_insert(Job).values(**job.model_dump(mode="python"))
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
-        set_={
-            "last_seen_at": job.last_seen_at,
-            "title": job.title,
-            "description_raw": job.description_raw,
-            "url": job.url,
-            "posted_at": job.posted_at,
-            "salary_min": job.salary_min,
-            "salary_max": job.salary_max,
-            "salary_currency": job.salary_currency,
-            "remote": job.remote,
-            "skills": job.skills,
-        },
+        set_={name: getattr(job, name) for name in _UPDATE_FIELDS},
     )
     session.exec(stmt)
     session.commit()
