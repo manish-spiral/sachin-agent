@@ -31,8 +31,9 @@ def parse_dt(value: str | int | float | None) -> datetime | None:
         except (OverflowError, OSError, ValueError):
             return None
     try:
-        # handles "2024-01-01T00:00:00Z"
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # handles "2024-01-01T00:00:00Z" and bare dates like "2024-01-01"
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except ValueError:
         pass
     try:

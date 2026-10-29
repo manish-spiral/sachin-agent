@@ -32,6 +32,8 @@ class Job(SQLModel, table=True):
     __table_args__ = (
         Index("ix_jobs_source_external", "source", "external_id", unique=True),
         Index("ix_jobs_status", "status"),
+        Index("ix_jobs_company_norm", "company_norm"),
+        Index("ix_jobs_duplicate_of", "duplicate_of"),
     )
 
     id: str = Field(primary_key=True)
@@ -61,3 +63,9 @@ class Job(SQLModel, table=True):
 
     first_seen_at: datetime = Field(default_factory=_now)
     last_seen_at: datetime = Field(default_factory=_now)
+
+    # Phase 4 (additive): canonical keys for dedup, and the canonical job this
+    # one duplicates. Downstream modules skip rows where duplicate_of is set.
+    title_norm: str | None = None
+    company_norm: str | None = None
+    duplicate_of: str | None = None

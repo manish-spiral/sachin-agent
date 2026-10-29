@@ -1,5 +1,10 @@
 {
   "greenhouse": ["stripe", "vercel"],
   "lever": ["spotify", "palantir"],
-  "ashby": ["openai", "ramp"]
+  "ashby": ["openai", "ramp"],
+  "workable": ["huggingface"],
+  "smartrecruiters": ["ServiceNow"],
+  "remoteok": ["all"],
+  "remotive": ["software-dev"],
+  "arbeitnow": ["all"]
 }

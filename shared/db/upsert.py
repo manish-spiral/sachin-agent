@@ -8,7 +8,8 @@ from sqlmodel import Session
 from shared.schemas.job import Job
 
 # Whitelist of fields a re-scrape may overwrite. Everything else — status,
-# score, score_breakdown, first_seen_at — is user/matcher state or history.
+# score, score_breakdown, first_seen_at, duplicate_of — is user/matcher/dedup
+# state or history.
 _UPDATE_FIELDS = (
     "last_seen_at",
     "title",
@@ -20,6 +21,10 @@ _UPDATE_FIELDS = (
     "salary_currency",
     "remote",
     "skills",
+    "location_raw",
+    "location_norm",
+    "title_norm",
+    "company_norm",
 )
 
 

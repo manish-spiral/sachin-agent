@@ -40,14 +40,35 @@ class HttpFetchError(RuntimeError):
 
 
 class BaseSource(ABC):
-    """One ATS. Stateless — the runner passes an httpx client in."""
+    """One ATS or job board. Stateless — the runner passes an httpx client in.
+
+    A "board" is whatever the source is queried by: a company slug for an ATS,
+    a tag/category (or "all") for an aggregator.
+    """
 
     name: str = "base"
     domain: str = "unknown"
+    # Boards used when scraper/companies.json has no entry for this source.
+    default_boards: tuple[str, ...] = ()
+    # Lower ranks win when dedup picks the canonical copy. Direct ATS postings
+    # beat aggregator reposts because they carry the real apply URL.
+    dedup_rank: int = 0
+    # Minimum hours between successful runs of one board, from the board's ToS.
+    min_interval_hours: float | None = None
 
     @abstractmethod
     async def fetch(self, client: httpx.AsyncClient, company: str) -> list[RawJob]:
-        """Return raw jobs for one company board."""
+        """Return raw jobs for one board."""
+
+    async def enrich(
+        self, client: httpx.AsyncClient, raws: list[RawJob]
+    ) -> tuple[list[RawJob], list[tuple[RawJob, Exception]]]:
+        """Fetch per-job details the list endpoint omits. Runs after --limit.
+
+        Returns every raw (enriched where possible) plus the per-job errors, so
+        one bad detail page costs a description, not the whole board.
+        """
+        return raws, []
 
     @abstractmethod
     def normalize(self, raw: RawJob) -> Job:
