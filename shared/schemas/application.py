@@ -23,6 +23,8 @@ class PauseReason(StrEnum):
     CONSENT = "consent"
     UNKNOWN_FIELD = "unknown_field"
     ADAPTER_APPROVAL = "adapter_approval"
+    # Phase 7 (additive): the form is filled; a human must approve the submit.
+    SUBMIT_APPROVAL = "submit_approval"
 
 
 def _now() -> datetime:

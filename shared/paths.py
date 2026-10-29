@@ -44,3 +44,8 @@ def resumes_dir() -> Path:
 
 def cover_letters_dir() -> Path:
     return Path(get_settings().profile_data_dir) / "cover_letters"
+
+
+def application_dir(application_id: str) -> Path:
+    """Screenshots, DOM dumps, browser state and the step log of one application."""
+    return Path(get_settings().data_dir) / "applications" / application_id

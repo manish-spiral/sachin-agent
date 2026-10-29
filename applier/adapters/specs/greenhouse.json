@@ -1,0 +1,19 @@
+{
+  "domain": "greenhouse.io",
+  "version": 1,
+  "form_url": "{url}",
+  "open_form": {"strategy": "role", "role": "button", "value": "Apply"},
+  "form_marker": {"strategy": "css", "value": "input#first_name"},
+  "fields": [
+    {"intent": "first_name", "locator": {"strategy": "css", "value": "input#first_name"}, "required": true},
+    {"intent": "last_name", "locator": {"strategy": "css", "value": "input#last_name"}, "required": true},
+    {"intent": "email", "locator": {"strategy": "css", "value": "input#email"}, "required": true},
+    {"intent": "phone", "locator": {"strategy": "css", "value": "input#phone"}},
+    {"intent": "location", "locator": {"strategy": "css", "value": "input#candidate-location"}},
+    {"intent": "resume", "kind": "file", "locator": {"strategy": "css", "value": "input#resume"}, "required": true},
+    {"intent": "cover_letter", "kind": "file", "locator": {"strategy": "css", "value": "input#cover_letter"}}
+  ],
+  "questions": {"strategy": "css", "value": "input[id^='question_'], textarea[id^='question_'], select[id^='question_']"},
+  "submit": {"strategy": "role", "role": "button", "value": "Submit application"},
+  "success": {"strategy": "text", "value": "Thank you for applying"}
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- Offline stand-in for a job-boards.greenhouse.io application form. Mirrors
+     the structure seen live (ids, ARIA comboboxes, file inputs, EEO and
+     acknowledgement questions); written for tests, not copied from Greenhouse. -->
+<html><head><meta charset="utf-8"><title>Job Application for Backend Engineer at Acme</title>
+<style>[role=listbox]{border:1px solid #999} [hidden]{display:none}</style></head>
+<body>
+<h1>Backend Engineer</h1>
+<button type="button" id="apply" onclick="document.getElementById('app').hidden=false">Apply</button>
+<form id="app" hidden onsubmit="return submitForm(event)">
+  <label for="first_name">First Name*</label><input type="text" id="first_name" required>
+  <label for="last_name">Last Name*</label><input type="text" id="last_name" required>
+  <label for="email">Email*</label><input type="text" id="email" required>
+  <label for="phone">Phone*</label><input type="tel" id="phone">
+  <label for="resume">Resume/CV*</label><input type="file" id="resume" required>
+  <label for="cover_letter">Cover Letter</label><input type="file" id="cover_letter">
+
+  <label for="question_1">Will you require Visa Sponsorship now, or in the future?*</label>
+  <input type="text" id="question_1" role="combobox" aria-required="true" data-options="Yes|No">
+  <label for="question_2">LinkedIn Profile</label><input type="text" id="question_2">
+  <label for="question_3">What is your notice period?*</label>
+  <input type="text" id="question_3" aria-required="true">
+  <label for="question_4">Where did you first hear about this role?*</label>
+  <input type="text" id="question_4" role="combobox" aria-required="true" data-options="LinkedIn|Referral|Other">
+  <label for="question_5">By submitting my application, I acknowledge the Acme privacy notice*</label>
+  <input type="text" id="question_5" role="combobox" aria-required="true" data-options="I acknowledge">
+  <label for="question_6">How would you describe your gender identity?</label>
+  <input type="text" id="question_6" role="combobox" data-options="Man|Woman|Non-binary|I don't wish to answer">
+
+  <button type="submit">Submit application</button>
+</form>
+<div id="done" hidden><h2>Thank you for applying.</h2></div>
+<script>
+// Minimal ARIA combobox: click shows options, typing filters, click selects.
+let open = null;
+function closeList() { if (open) { open.remove(); open = null; } }
+document.querySelectorAll('[role=combobox]').forEach(input => {
+  const show = () => {
+    closeList();
+    const list = document.createElement('div');
+    list.setAttribute('role', 'listbox');
+    for (const text of input.dataset.options.split('|')) {
+      if (input.value && !text.toLowerCase().includes(input.value.toLowerCase())) continue;
+      const opt = document.createElement('div');
+      opt.setAttribute('role', 'option'); opt.textContent = text;
+      opt.onmousedown = e => { e.preventDefault(); input.value = text; input.dataset.chosen = text; closeList(); };
+      list.appendChild(opt);
+    }
+    input.after(list); open = list;
+  };
+  input.addEventListener('click', show);
+  input.addEventListener('input', show);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeList(); });
+function submitForm(e) {
+  e.preventDefault();
+  const missing = [...document.querySelectorAll('[required],[aria-required=true]')]
+    .filter(el => el.type === 'file' ? !el.files.length : !el.value);
+  if (missing.length) { document.body.dataset.missing = missing.map(m => m.id).join(','); return false; }
+  document.getElementById('app').hidden = true;
+  document.getElementById('done').hidden = false;
+  window.submittedCount = (window.submittedCount || 0) + 1;
+  return false;
+}
+</script>
+</body></html>
