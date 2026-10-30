@@ -10,11 +10,11 @@ from typer.testing import CliRunner
 from applier.adapters import builtin_spec
 from applier.adapters.form import FormAdapter
 from applier.adapters.spec import LocatorSpec, Strategy
-from applier.snapshot import SnapshotRecorder
 from sandbox.cli import app as sandbox_cli
 from sandbox.harness import form_snapshots, run_suite
 from sandbox.replay import ReplaySession, replay
 from sandbox.suites import ATS_FORM_SUITE
+from shared.browser.snapshot import SnapshotRecorder
 from shared.schemas.snapshot import SnapshotIndex
 from tests.applier_helpers import FIXTURE, Browser
 

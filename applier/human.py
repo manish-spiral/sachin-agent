@@ -12,7 +12,7 @@ from typing import Protocol
 import typer
 
 from applier.adapters.base import FillReport
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 from shared.schemas.application import Application, PauseReason
 
 

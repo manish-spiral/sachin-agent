@@ -20,11 +20,11 @@ from applier.adapters import adapter_for_url
 from applier.adapters.base import FillReport
 from applier.adapters.form import FormAdapter, SelectorNotFound
 from applier.context import Answer, ApplicantContext
-from applier.detectors import Blocker, click_consent, detect_blocker
 from applier.human import Absent, Human
 from applier.memory import consents_for, remember_answer, remember_consent
-from applier.session import BrowserSession
-from applier.snapshot import SnapshotRecorder, new_run_id
+from shared.browser.detectors import Blocker, click_consent, detect_blocker
+from shared.browser.session import BrowserSession
+from shared.browser.snapshot import SnapshotRecorder, new_run_id
 from shared.config import get_settings
 from shared.db.engine import get_session
 from shared.db.failures import domain_from_url, emit_failure

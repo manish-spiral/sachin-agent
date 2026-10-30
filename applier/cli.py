@@ -13,7 +13,7 @@ from applier.context import Answer, ApplicantContext
 from applier.human import Absent, Human, Terminal
 from applier.memory import forget_consents, remember_answer, remember_consent
 from applier.runner import ApplyError, application_url, run_application
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 from shared.config import get_settings
 from shared.db.engine import get_session
 from shared.logging import configure_logging
@@ -172,7 +172,7 @@ def inspect(job_id: Annotated[str, typer.Argument(help="Job id or unique prefix.
     if adapter is None:
         typer.echo(f"✗ no adapter for {url} (Phase 15 synthesizes one)", err=True)
         raise typer.Exit(1)
-    from applier.snapshot import SnapshotRecorder, new_run_id
+    from shared.browser.snapshot import SnapshotRecorder, new_run_id
     from shared.db.failures import domain_from_url
 
     applicant = ApplicantContext(facts=active_facts(include_pii=True))

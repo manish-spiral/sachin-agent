@@ -10,7 +10,7 @@ from loguru import logger
 from applier.adapters.base import Adapter, FieldResult, FillReport, PageInfo
 from applier.adapters.spec import AdapterSpec, FieldKind, FieldSpec, LocatorSpec, Strategy
 from applier.context import Answer, ApplicantContext, Unanswerable
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 
 if TYPE_CHECKING:
     from playwright.sync_api import Locator, Page

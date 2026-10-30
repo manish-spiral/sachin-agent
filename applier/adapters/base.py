@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from applier.context import ApplicantContext
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 
 
 @dataclass

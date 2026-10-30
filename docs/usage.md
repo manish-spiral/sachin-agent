@@ -77,6 +77,8 @@ Every CLI has `--help`. Ids can be given as unique prefixes.
 | `health [--by-source]` | per-board run success rate, last success, last error |
 | `stats [--top N]` | totals, duplicate rate, by source and location |
 | `normalize` | recompute normalized keys for all jobs, then dedup |
+| `browse-login SITE` | log in once in a visible browser (session kept in `browser_profile/`) |
+| `browse [SITES…] --ok [-q TERM] [-l PLACE] [--pages N] [--force]` | read job listings from logged-in sites, read-only and human-paced; `--ok` accepts the account risk (required). Defaults from `scraper/browse.json` |
 
 ### `sachin-agent-matcher`
 

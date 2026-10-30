@@ -79,7 +79,7 @@ make install-timer                              # systemd user timer, 02:00
 ## Repository layout
 
 ```
-scraper/        job sources → normalized, deduplicated jobs
+scraper/        job sources (APIs + opt-in logged-in browse cluster) → normalized, deduplicated jobs
 matcher/        scoring, review, calibration, resume/cover-letter tailoring
 applier/        browser session, adapters, human-in-the-loop, snapshots
 orchestrator/   run-all: runs the module CLIs as subprocesses

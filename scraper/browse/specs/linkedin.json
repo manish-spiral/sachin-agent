@@ -1,0 +1,13 @@
+{
+  "site": "linkedin",
+  "domain": "linkedin.com",
+  "version": 1,
+  "card": "li[data-occludable-job-id], div[data-job-id], div.base-card[data-entity-urn*='jobPosting']",
+  "id_attributes": ["data-occludable-job-id", "data-job-id", "data-entity-urn"],
+  "link": "a[href*='/jobs/view/']",
+  "title": "a.job-card-list__title--link, a.job-card-container__link, .base-search-card__title",
+  "company": ".artdeco-entity-lockup__subtitle, .job-card-container__primary-description, .base-search-card__subtitle",
+  "location": ".artdeco-entity-lockup__caption, .job-card-container__metadata-wrapper, .job-search-card__location",
+  "list_container": ".scaffold-layout__list, .jobs-search-results-list, .jobs-search__results-list",
+  "description": "#job-details, .jobs-description__content, .jobs-description-content__text, .show-more-less-html__markup"
+}

@@ -21,7 +21,7 @@ Phases 10–13 are built. Phases 14 (skill library), 15 (adapter synthesis) and
 
 ## Phase 10: snapshots everywhere
 
-**Browser** (`applier/snapshot.py`). Every applier step calls
+**Browser** (`shared/browser/snapshot.py`). Every applier step (and every browse page) calls
 `SnapshotRecorder.capture()`, which writes:
 
 ```

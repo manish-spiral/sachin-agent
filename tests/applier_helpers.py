@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from applier.adapters.base import FillReport
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 from shared.db.engine import get_session
 from shared.db.upsert import upsert_job
 from shared.schemas.application import Application, PauseReason

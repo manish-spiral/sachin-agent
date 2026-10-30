@@ -90,6 +90,38 @@ Aggregators fall back to their default board when none is configured.
 6. **Upsert** idempotently. A failure on one job is recorded and the rest continue.
 7. Record the board's run in `source_health`; emit a `FailureEvent` on errors.
 
+### Browse cluster: logged-in sites (opt-in)
+
+`scraper/browse/`, CLI `sachin-agent-scraper browse-login SITE` and
+`sachin-agent-scraper browse [SITES…] --ok`.
+
+Sites with no public jobs API (LinkedIn so far) are read through **your own
+logged-in browser session**. This is a deliberate exception you opted into;
+see [safety.md](safety.md#the-browse-cluster-exception).
+
+1. `browse-login linkedin` opens a visible browser at the login page. You log
+   in yourself (2FA included); the window closes once you're in. Only the
+   browser profile's session cookies are kept, locally in `browser_profile/`.
+2. `browse --ok` runs every site in the cluster (`scraper/browse/__init__.py`)
+   with the searches in `scraper/browse.json`: default `"AI engineer"` ×
+   `Delhi, India` / `Bengaluru, India` / `Remote` (remote = LinkedIn's remote
+   filter for jobs open to `remote_country`), past week, 2 result pages each.
+   `-q`, `-l` and `--pages` override it for one run.
+3. For each results page: open the site's own search URL → wait a random 4–9s
+   → **checkpoint check** → scroll each card into view → read id, title,
+   company and location using the site's **listing spec**
+   (`scraper/browse/specs/linkedin.json`: data, healable like adapters). If the
+   spec matches nothing, a fallback reads any `/jobs/view/<id>` link. Up to
+   `details` (default 20) new cards per run are clicked (on a non-link part,
+   so the page never navigates) to read their description.
+4. Jobs go through the same normalize → upsert → dedup path as every source
+   (`source = "linkedin"`); each page is snapshotted.
+5. **Checkpoint** (login redirect, security check, a *visible* challenge): the
+   run stops at once, snapshots the page, records an `auth_wall`/`captcha`
+   failure, and messages you. Nothing is retried. LinkedIn embeds a hidden
+   bot-detection sensor on every page; it's ignored because it isn't a
+   challenge, but it means LinkedIn sees automation.
+
 ### Dedup (`shared/db/dedup.py`)
 
 After every run, all jobs are re-clustered **within each company**:
@@ -238,7 +270,7 @@ the built-in spec registers as v1 on first use.
 3. **Open.** Greenhouse jobs often link to company career pages, so the form
    URL is rebuilt from the board: `job-boards.greenhouse.io/<board>/jobs/<id>`.
    If the form hides behind "Apply", that's clicked.
-4. **Walls** (`applier/detectors.py`), up to 4 rounds:
+4. **Walls** (`shared/browser/detectors.py`), up to 4 rounds:
    - a *visible* CAPTCHA challenge (reCAPTCHA/hCaptcha/Turnstile frames or
      "verify you are human"; invisible reCAPTCHA is ignored) → human;
    - a login wall (visible password field, login URL, "sign in to continue") → human;

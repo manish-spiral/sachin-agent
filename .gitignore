@@ -29,4 +29,5 @@ profile-data/*
 
 # Personal scraper config (template: scraper/companies.example.json)
 scraper/companies.json
+scraper/browse.json
 

@@ -11,9 +11,9 @@ from sqlmodel import select
 
 from applier.answering import FactInferrer, InferredAnswer
 from applier.context import Answer, AnswerSource, ApplicantContext
-from applier.detectors import detect_captcha, detect_consent, detect_login_wall
 from applier.memory import consents_for
 from applier.runner import make_application_id, run_application
+from shared.browser.detectors import detect_captcha, detect_consent, detect_login_wall
 from shared.config import reset_settings
 from shared.db.engine import get_session
 from shared.notify import notify

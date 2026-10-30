@@ -12,7 +12,7 @@ one to the code that enforces it and the test that proves it.
 | 5 | No fabrication on finalize | `Profile` has `extra="forbid"` and a `finalized` completeness gate; scoring/tailoring/applying refuse drafts | `test_profile.py`, `test_requires_finalized_profile` |
 | 6 | Deterministic job ids | `make_job_id` = `sha256(source\|external_id)` | `test_upsert.py` |
 | 7 | Idempotency | upserts, deterministic application/document ids, full-recompute dedup | `test_run_inserts_and_is_idempotent`, `test_dedup_is_idempotent…`, `already submitted` test |
-| 8 | CAPTCHA, consent, login are hard stops | `applier/detectors.py` only detects; `Human` decides; consent memory replays only your own choice per domain | `test_hitl.py` |
+| 8 | CAPTCHA, consent, login are hard stops | `shared/browser/detectors.py` only detects; `Human` decides; consent memory replays only your own choice per domain | `test_hitl.py` |
 | 9 | First run of a synthesized adapter is supervised | applications always pause before submit (below); Phase 15 adds an explicit approval gate | — |
 | 10 | Pause before submit by default | `Human.approve` is required for every submit; `Absent` (unattended) never approves | `test_fills_from_facts…`, `test_human_resolves…` |
 | 11 | ToS and rate limits | `Retry-After` honoured (capped), backoff on 429/5xx, per-source minimum intervals (Remotive ≤4/day), daily application cap | `test_scraper.py`, `test_runner_normalizes_and_respects_min_interval`, `test_daily_cap` |
@@ -22,6 +22,27 @@ one to the code that enforces it and the test that proves it.
 | 15 | The safety core can't be self-modified | healing and synthesis only produce **specs** (locators); detectors, consent policy, approval gates, rate limits and PII handling are code the loop never writes | design: `applier/adapters/spec.py` |
 | 16 | Optimize outcomes, not volume | daily cap; auto-approval off by default; scoring caps impossible jobs | settings defaults |
 | 18 | Lazy imports of heavy deps | `openai` and `playwright` imported inside the functions that use them | — |
+
+## The browse cluster exception
+
+Constraint 11 says "comply with ToS". LinkedIn (and Naukri, Wellfound) forbid
+automated access, have no public jobs API, and actively detect automation
+(LinkedIn runs a bot-detection sensor on every page). Reading them was
+**explicitly opted into by the owner**, who accepted the risk of account
+restriction, under these guardrails, all enforced in `scraper/browse/`:
+
+| Guardrail | How |
+|---|---|
+| Opt-in per run | `sachin-agent-scraper browse` exits unless given `--ok` |
+| Your own account only | session from `browse-login`, where you type your own credentials; no fake accounts |
+| Read-only | navigates only to the site's own search URLs; clicks a card's non-link area to show its description; never applies, messages, connects or edits; a test asserts only search URLs were opened |
+| Human pace | random 4–9s between pages, results-page and description caps, at most one run per site per 20h (`--force` overrides) |
+| Stop at any checkpoint | login redirect, security check or visible challenge → stop, snapshot, notify; never solved, never retried in a loop |
+| No disguise | no stealth plugins, fingerprint spoofing, proxies or CAPTCHA solvers |
+| Kill switch | checked before every page |
+
+Applications to these jobs stay manual on the site itself, unless the posting
+links to a company ATS the applier supports.
 
 ## Privacy
 

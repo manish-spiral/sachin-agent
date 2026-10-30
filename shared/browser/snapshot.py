@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from applier.session import BrowserSession
+from shared.browser.session import BrowserSession
 from shared.db.engine import get_session
 from shared.paths import snapshot_run_dir
 from shared.schemas.snapshot import SnapshotIndex

@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from applier.adapters.form import FormAdapter
-from applier.session import BrowserSession
 from sandbox.offline import OfflineBrowser
+from shared.browser.session import BrowserSession
 from shared.schemas.snapshot import SnapshotIndex
 
 if TYPE_CHECKING:

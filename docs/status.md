@@ -25,6 +25,7 @@ against an offline fixture that mirrors a real Greenhouse form.
 | 11 Diagnosis | rules + LLM classifier, escalations as failures, stats | ✓ 49 real failures all classified; baseline recorded | |
 | 12 Replay sandbox | replay, suites, harness, suite gate | ✓ 5/5 real snapshots in 3.1s; broken spec 0/5 | |
 | 13 Selector healing | versioned specs, healer, promotion gate, rollback | ✓ broken spec healed from real snapshots, verified live read-only, rolled back | |
+| 4b Browse cluster | LinkedIn read with your own session: opt-in `--ok`, read-only, human-paced, stops at checkpoints | ✓ listing spec + fallback checked on one real public page (60 cards) | logged-in run needs your `browse-login` |
 | 14 Skill library | — | | not started |
 | 15 Adapter synthesis | — | | not started |
 | 16 Teaching UI, meta-reflector, metrics | — | | not started (parts exist: answers bank teaching, consent memory) |

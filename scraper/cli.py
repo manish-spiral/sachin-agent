@@ -173,5 +173,62 @@ def stats(
         typer.echo(f"  {place:<30} {count:>6}")
 
 
+@app.command("browse-login")
+def browse_login_cmd(site: Annotated[str, typer.Argument(help="Site in the browse cluster, e.g. linkedin.")]) -> None:
+    """Log in once in a visible browser; the session is kept for `browse`."""
+    from scraper.browse import BROWSE_SITES
+    from scraper.browse.runner import browse_login
+
+    if site not in BROWSE_SITES:
+        typer.echo(f"✗ unknown site {site!r}. Cluster: {', '.join(BROWSE_SITES)}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"A browser window is opening at {site}. Log in normally (2FA included); "
+               "it closes by itself once you're in. Your password is never seen or stored.")
+    if browse_login(BROWSE_SITES[site]()):
+        typer.echo("Logged in; session saved.")
+    else:
+        typer.echo("✗ Not logged in within 5 minutes.", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def browse(
+    sites: Annotated[list[str] | None, typer.Argument(help="Sites to browse (default: the whole cluster).")] = None,
+    ok: Annotated[bool, typer.Option("--ok", help="I accept the risk to my accounts (required).")] = False,
+    query: Annotated[list[str] | None, typer.Option("-q", help="Search terms (default: scraper/browse.json).")] = None,
+    location: Annotated[list[str] | None, typer.Option("-l", help="Locations; 'Remote' for remote jobs.")] = None,
+    pages: Annotated[int | None, typer.Option("--pages")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Ignore the once-a-day limit.")] = False,
+) -> None:
+    """Read job listings from logged-in sites, read-only and at human pace."""
+    from scraper.browse import BROWSE_SITES
+    from scraper.browse.runner import BrowseConfig, browse_site
+
+    if not ok:
+        typer.echo("✗ Browsing logged-in sites is against their terms and can get your account restricted.\n"
+                   "  It is read-only and human-paced, but the risk is yours: re-run with --ok to accept it.",
+                   err=True)
+        raise typer.Exit(2)
+    chosen = sites or list(BROWSE_SITES)
+    unknown = [s for s in chosen if s not in BROWSE_SITES]
+    if unknown:
+        typer.echo(f"✗ unknown site(s) {unknown}. Cluster: {', '.join(BROWSE_SITES)}", err=True)
+        raise typer.Exit(1)
+    config = BrowseConfig.load()
+    config.queries = query or config.queries
+    config.locations = location or config.locations
+    config.pages = pages or config.pages
+    for name in chosen:
+        site = BROWSE_SITES[name](remote_country=config.remote_country)
+        report = browse_site(site, config, force=force)
+        if report.skipped:
+            typer.echo(f"{name}: skipped — {report.skipped}")
+        elif report.stopped:
+            typer.echo(f"{name}: stopped — {report.stopped} ({report.stored} jobs stored before that)")
+        else:
+            typer.echo(f"{name}: {report.stored} jobs from {report.pages} pages, "
+                       f"{report.descriptions} descriptions read")
+
+
 if __name__ == "__main__":
     app()
